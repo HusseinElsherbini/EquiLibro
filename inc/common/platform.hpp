@@ -173,7 +173,10 @@ namespace NVIC {
     inline void setPriority(IRQn irq, uint32_t priority) {
         // Set priority for Cortex-M system interrupts
         if (static_cast<int32_t>(irq) < 0) {
-            SCB->SHP[(static_cast<uint32_t>(irq) & 0xFUL)-4UL] = 
+
+            SCB::getRegisters()->SHP[(static_cast<uint32_t>(irq) & 0xFUL)-4UL] = 
+                static_cast<uint8_t>((priority << (8U - 4)) & 0xFFU);
+                SCB::getRegisters()->SHP[(static_cast<uint32_t>(irq) & 0xFUL)-4UL] = 
                 static_cast<uint8_t>((priority << (8U - 4)) & 0xFFU);
         } else {
             // Set priority for device specific interrupts
@@ -381,7 +384,7 @@ namespace GPIO {
 namespace RCC {
     constexpr uint32_t RCC_BASE = (AHB1PERIPH_BASE + 0x3800UL);
 
-    // RCC register structure
+    // RCC register structure (based on RM0368)
     struct Registers {
         volatile uint32_t CR;            // Clock control register
         volatile uint32_t PLLCFGR;       // PLL configuration register
@@ -398,66 +401,93 @@ namespace RCC {
         uint32_t RESERVED2[2];
         volatile uint32_t APB1ENR;       // APB1 peripheral clock enable register
         volatile uint32_t APB2ENR;       // APB2 peripheral clock enable register
+        uint32_t RESERVED3[2];
+        volatile uint32_t AHB1LPENR;     // AHB1 peripheral clock enable in low power mode register
+        volatile uint32_t AHB2LPENR;     // AHB2 peripheral clock enable in low power mode register
+        uint32_t RESERVED4[2];
+        volatile uint32_t APB1LPENR;     // APB1 peripheral clock enable in low power mode register
+        volatile uint32_t APB2LPENR;     // APB2 peripheral clock enable in low power mode register
+        uint32_t RESERVED5[2];
+        volatile uint32_t BDCR;          // Backup domain control register
+        volatile uint32_t CSR;           // Clock control & status register
+        uint32_t RESERVED6[2];
+        volatile uint32_t SSCGR;         // Spread spectrum clock generation register
+        volatile uint32_t PLLI2SCFGR;    // PLLI2S configuration register
+        uint32_t RESERVED7;
+        volatile uint32_t DCKCFGR;       // Dedicated Clocks Configuration Register
     };
 
     // RCC_CR register bits
     enum class CR : uint32_t {
-        HSION = (1UL << 0),
-        HSIRDY = (1UL << 1),
-        HSITRIM_MSK = (0x1FUL << 3),
-        HSICAL_MSK = (0xFFUL << 8),
-        HSEON = (1UL << 16),
-        HSERDY = (1UL << 17),
-        HSEBYP = (1UL << 18),
-        CSSON = (1UL << 19),
-        PLLON = (1UL << 24),
-        PLLRDY = (1UL << 25),
-        PLLI2SON = (1UL << 26),
-        PLLI2SRDY = (1UL << 27)
+        HSION = (1UL << 0),      // Internal high-speed clock enable
+        HSIRDY = (1UL << 1),     // Internal high-speed clock ready flag
+        HSITRIM_MSK = (0x1FUL << 3), // Internal high-speed clock trimming mask
+        HSICAL_MSK = (0xFFUL << 8),  // Internal high-speed clock calibration mask
+        HSEON = (1UL << 16),     // HSE clock enable
+        HSERDY = (1UL << 17),    // HSE clock ready flag
+        HSEBYP = (1UL << 18),    // HSE clock bypass
+        CSSON = (1UL << 19),     // Clock security system enable
+        PLLON = (1UL << 24),     // Main PLL enable
+        PLLRDY = (1UL << 25),    // Main PLL clock ready flag
+        PLLI2SON = (1UL << 26),  // PLLI2S enable
+        PLLI2SRDY = (1UL << 27)  // PLLI2S clock ready flag
     };
 
     // PLLCFGR register bits
     enum class PLLCFGR : uint32_t {
-        PLLM_MSK = (0x3FUL << 0),
-        PLLN_MSK = (0x1FFUL << 6),
-        PLLP_MSK = (0x3UL << 16),
-        PLLSRC_HSI = 0UL,
-        PLLSRC_HSE = (1UL << 22),
-        PLLQ_MSK = (0xFUL << 24)
+        PLLM_MSK = (0x3FUL << 0),    // Division factor for the main PLL input clock
+        PLLN_MSK = (0x1FFUL << 6),   // Main PLL multiplication factor for VCO
+        PLLP_MSK = (0x3UL << 16),    // Main PLL division factor for main system clock
+        PLLSRC_HSI = 0UL,            // HSI clock selected as PLL entry clock source
+        PLLSRC_HSE = (1UL << 22),    // HSE oscillator clock selected as PLL entry clock source
+        PLLQ_MSK = (0xFUL << 24)     // Main PLL division factor for USB OTG FS, SDIO, RNG
     };
 
     // Clock configuration register (CFGR) bits
     enum class CFGR : uint32_t {
-        SW_HSI = (0UL << 0),
-        SW_HSE = (1UL << 0),
-        SW_PLL = (2UL << 0),
-        SW_MSK = (0x3UL << 0),
-        SWS_HSI = (0UL << 2),
-        SWS_HSE = (1UL << 2),
-        SWS_PLL = (2UL << 2),
-        SWS_MSK = (0x3UL << 2),
-        HPRE_DIV1 = (0UL << 4),
-        HPRE_DIV2 = (8UL << 4),
-        HPRE_DIV4 = (9UL << 4),
-        HPRE_DIV8 = (10UL << 4),
-        HPRE_DIV16 = (11UL << 4),
-        HPRE_DIV64 = (12UL << 4),
-        HPRE_DIV128 = (13UL << 4),
-        HPRE_DIV256 = (14UL << 4),
-        HPRE_DIV512 = (15UL << 4),
-        HPRE_MSK = (0xFUL << 4),
-        PPRE1_DIV1 = (0UL << 10),
-        PPRE1_DIV2 = (4UL << 10),
-        PPRE1_DIV4 = (5UL << 10),
-        PPRE1_DIV8 = (6UL << 10),
-        PPRE1_DIV16 = (7UL << 10),
-        PPRE1_MSK = (0x7UL << 10),
-        PPRE2_DIV1 = (0UL << 13),
-        PPRE2_DIV2 = (4UL << 13),
-        PPRE2_DIV4 = (5UL << 13),
-        PPRE2_DIV8 = (6UL << 13),
-        PPRE2_DIV16 = (7UL << 13),
-        PPRE2_MSK = (0x7UL << 13)
+        SW_HSI = (0UL << 0),         // HSI selected as system clock
+        SW_HSE = (1UL << 0),         // HSE selected as system clock
+        SW_PLL = (2UL << 0),         // PLL selected as system clock
+        SW_MSK = (0x3UL << 0),       // System clock switch mask
+        SWS_HSI = (0UL << 2),        // HSI used as system clock
+        SWS_HSE = (1UL << 2),        // HSE used as system clock
+        SWS_PLL = (2UL << 2),        // PLL used as system clock
+        SWS_MSK = (0x3UL << 2),      // System clock switch status mask
+        HPRE_DIV1 = (0UL << 4),      // AHB prescaler: SYSCLK not divided
+        HPRE_DIV2 = (8UL << 4),      // AHB prescaler: SYSCLK divided by 2
+        HPRE_DIV4 = (9UL << 4),      // AHB prescaler: SYSCLK divided by 4
+        HPRE_DIV8 = (10UL << 4),     // AHB prescaler: SYSCLK divided by 8
+        HPRE_DIV16 = (11UL << 4),    // AHB prescaler: SYSCLK divided by 16
+        HPRE_DIV64 = (12UL << 4),    // AHB prescaler: SYSCLK divided by 64
+        HPRE_DIV128 = (13UL << 4),   // AHB prescaler: SYSCLK divided by 128
+        HPRE_DIV256 = (14UL << 4),   // AHB prescaler: SYSCLK divided by 256
+        HPRE_DIV512 = (15UL << 4),   // AHB prescaler: SYSCLK divided by 512
+        HPRE_MSK = (0xFUL << 4),     // AHB prescaler mask
+        PPRE1_DIV1 = (0UL << 10),    // APB1 prescaler: HCLK not divided
+        PPRE1_DIV2 = (4UL << 10),    // APB1 prescaler: HCLK divided by 2
+        PPRE1_DIV4 = (5UL << 10),    // APB1 prescaler: HCLK divided by 4
+        PPRE1_DIV8 = (6UL << 10),    // APB1 prescaler: HCLK divided by 8
+        PPRE1_DIV16 = (7UL << 10),   // APB1 prescaler: HCLK divided by 16
+        PPRE1_MSK = (0x7UL << 10),   // APB1 prescaler mask
+        PPRE2_DIV1 = (0UL << 13),    // APB2 prescaler: HCLK not divided
+        PPRE2_DIV2 = (4UL << 13),    // APB2 prescaler: HCLK divided by 2
+        PPRE2_DIV4 = (5UL << 13),    // APB2 prescaler: HCLK divided by 4
+        PPRE2_DIV8 = (6UL << 13),    // APB2 prescaler: HCLK divided by 8
+        PPRE2_DIV16 = (7UL << 13),   // APB2 prescaler: HCLK divided by 16
+        PPRE2_MSK = (0x7UL << 13),   // APB2 prescaler mask
+        RTCPRE_MSK = (0x1FUL << 16), // HSE division factor for RTC clock
+        MCO1_HSI = (0UL << 21),      // HSI clock selected as MCO1 source
+        MCO1_LSE = (1UL << 21),      // LSE clock selected as MCO1 source
+        MCO1_HSE = (2UL << 21),      // HSE clock selected as MCO1 source
+        MCO1_PLL = (3UL << 21),      // PLL clock selected as MCO1 source
+        MCO1_MSK = (0x3UL << 21),    // MCO1 source selection mask
+        MCO1PRE_MSK = (0x7UL << 24), // MCO1 prescaler mask
+        MCO2PRE_MSK = (0x7UL << 27), // MCO2 prescaler mask
+        MCO2_SYSCLK = (0UL << 30),   // System clock selected as MCO2 source
+        MCO2_PLLI2S = (1UL << 30),   // PLLI2S clock selected as MCO2 source
+        MCO2_HSE = (2UL << 30),      // HSE clock selected as MCO2 source
+        MCO2_PLL = (3UL << 30),      // PLL clock selected as MCO2 source
+        MCO2_MSK = (0x3UL << 30)     // MCO2 source selection mask
     };
 
     // AHB1 peripheral clock enable register (AHB1ENR) bits
@@ -468,8 +498,14 @@ namespace RCC {
         GPIODEN = (1UL << 3),
         GPIOEEN = (1UL << 4),
         GPIOHEN = (1UL << 7),
+        CRCEN = (1UL << 12),
         DMA1EN = (1UL << 21),
         DMA2EN = (1UL << 22)
+    };
+
+    // AHB2 peripheral clock enable register (AHB2ENR) bits
+    enum class AHB2ENR : uint32_t {
+        OTGFSEN = (1UL << 7)
     };
 
     // APB1 peripheral clock enable register (APB1ENR) bits
@@ -478,6 +514,7 @@ namespace RCC {
         TIM3EN = (1UL << 1),
         TIM4EN = (1UL << 2),
         TIM5EN = (1UL << 3),
+        WWDGEN = (1UL << 11),
         SPI2EN = (1UL << 14),
         SPI3EN = (1UL << 15),
         USART2EN = (1UL << 17),
@@ -493,11 +530,41 @@ namespace RCC {
         USART1EN = (1UL << 4),
         USART6EN = (1UL << 5),
         ADC1EN = (1UL << 8),
+        SDIOEN = (1UL << 11),
         SPI1EN = (1UL << 12),
         SPI4EN = (1UL << 13),
+        SYSCFGEN = (1UL << 14),
         TIM9EN = (1UL << 16),
         TIM10EN = (1UL << 17),
         TIM11EN = (1UL << 18)
+    };
+
+    // BDCR register bits
+    enum class BDCR : uint32_t {
+        LSEON = (1UL << 0),     // External low-speed oscillator enable
+        LSERDY = (1UL << 1),    // External low-speed oscillator ready
+        LSEBYP = (1UL << 2),    // External low-speed oscillator bypass
+        RTCSEL_NONE = (0UL << 8), // No clock
+        RTCSEL_LSE = (1UL << 8),  // LSE oscillator clock used as RTC clock
+        RTCSEL_LSI = (2UL << 8),  // LSI oscillator clock used as RTC clock
+        RTCSEL_HSE = (3UL << 8),  // HSE oscillator clock divided by a prescaler used as RTC clock
+        RTCSEL_MSK = (3UL << 8),  // RTC clock source selection mask
+        RTCEN = (1UL << 15),    // RTC clock enable
+        BDRST = (1UL << 16)     // Backup domain software reset
+    };
+
+    // CSR register bits
+    enum class CSR : uint32_t {
+        LSION = (1UL << 0),     // Internal low-speed oscillator enable
+        LSIRDY = (1UL << 1),    // Internal low-speed oscillator ready
+        RMVF = (1UL << 24),     // Remove reset flag
+        BORRSTF = (1UL << 25),  // BOR reset flag
+        PINRSTF = (1UL << 26),  // PIN reset flag
+        PORRSTF = (1UL << 27),  // POR/PDR reset flag
+        SFTRSTF = (1UL << 28),  // Software reset flag
+        WDGRSTF = (1UL << 29),  // Independent watchdog reset flag
+        WWDGRSTF = (1UL << 30), // Window watchdog reset flag
+        LPWRRSTF = (1UL << 31)  // Low-power reset flag
     };
 
     // Get RCC registers
@@ -522,6 +589,10 @@ namespace RCC {
         return static_cast<uint32_t>(bit);
     }
 
+    constexpr uint32_t getBitValue(AHB2ENR bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
     constexpr uint32_t getBitValue(APB1ENR bit) {
         return static_cast<uint32_t>(bit);
     }
@@ -530,9 +601,22 @@ namespace RCC {
         return static_cast<uint32_t>(bit);
     }
 
+    constexpr uint32_t getBitValue(BDCR bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(CSR bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
     // Operator overloads for combining flags
     constexpr AHB1ENR operator|(AHB1ENR a, AHB1ENR b) {
         return static_cast<AHB1ENR>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr AHB2ENR operator|(AHB2ENR a, AHB2ENR b) {
+        return static_cast<AHB2ENR>(
             static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
     }
 
@@ -560,8 +644,17 @@ namespace RCC {
         return static_cast<CFGR>(
             static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
     }
-}
 
+    constexpr BDCR operator|(BDCR a, BDCR b) {
+        return static_cast<BDCR>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr CSR operator|(CSR a, CSR b) {
+        return static_cast<CSR>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+}
 // -------------------- Timer Definitions --------------------
 
 namespace TIM {
@@ -997,6 +1090,622 @@ namespace I2C {
     }
 }
 
+// -------------------- ADC Definitions --------------------
+
+namespace ADC {
+    constexpr uint32_t ADC1_BASE = (APB2PERIPH_BASE + 0x2000UL);
+    constexpr uint32_t ADC_COMMON_BASE = (ADC1_BASE + 0x300UL);
+
+    // ADC channel definitions
+    enum class Channel : uint32_t {
+        Channel0 = 0UL,
+        Channel1 = 1UL,
+        Channel2 = 2UL,
+        Channel3 = 3UL,
+        Channel4 = 4UL,
+        Channel5 = 5UL,
+        Channel6 = 6UL,
+        Channel7 = 7UL,
+        Channel8 = 8UL,
+        Channel9 = 9UL,
+        Channel10 = 10UL,
+        Channel11 = 11UL,
+        Channel12 = 12UL,
+        Channel13 = 13UL,
+        Channel14 = 14UL,
+        Channel15 = 15UL,
+        Channel16 = 16UL,      // Temperature sensor
+        Channel17 = 17UL,      // VREFINT
+        Channel18 = 18UL       // VBAT
+    };
+
+    // Sample time definitions
+    enum class SampleTime : uint32_t {
+        Cycles3 = 0UL,
+        Cycles15 = 1UL,
+        Cycles28 = 2UL,
+        Cycles56 = 3UL,
+        Cycles84 = 4UL,
+        Cycles112 = 5UL,
+        Cycles144 = 6UL,
+        Cycles480 = 7UL
+    };
+
+    // Resolution definitions
+    enum class Resolution : uint32_t {
+        Bits12 = 0UL,
+        Bits10 = 1UL,
+        Bits8 = 2UL,
+        Bits6 = 3UL
+    };
+
+    // Data alignment
+    enum class Alignment : uint32_t {
+        Right = 0UL,
+        Left = 1UL
+    };
+
+    // External trigger edge
+    enum class ExternalTriggerEdge : uint32_t {
+        Disabled = 0UL,
+        RisingEdge = 1UL,
+        FallingEdge = 2UL,
+        BothEdges = 3UL
+    };
+
+    // External trigger sources for regular group
+    enum class ExternalTrigger : uint32_t {
+        Timer1_CC1 = 0UL,
+        Timer1_CC2 = 1UL,
+        Timer1_CC3 = 2UL,
+        Timer2_CC2 = 3UL,
+        Timer2_CC3 = 4UL,
+        Timer2_CC4 = 5UL,
+        Timer2_TRGO = 6UL,
+        Timer3_CC1 = 7UL,
+        Timer3_TRGO = 8UL,
+        Timer4_CC4 = 9UL,
+        Timer5_CC1 = 10UL,
+        Timer5_CC2 = 11UL,
+        Timer5_CC3 = 12UL,
+        Timer8_CC1 = 13UL,
+        Timer8_TRGO = 14UL,
+        EXTI_Line11 = 15UL
+    };
+
+    // ADC register structure
+    struct ADC_Registers {
+        volatile uint32_t SR;           // ADC status register
+        volatile uint32_t CR1;          // ADC control register 1
+        volatile uint32_t CR2;          // ADC control register 2
+        volatile uint32_t SMPR1;        // ADC sample time register 1
+        volatile uint32_t SMPR2;        // ADC sample time register 2
+        volatile uint32_t JOFR1;        // ADC injected channel data offset register 1
+        volatile uint32_t JOFR2;        // ADC injected channel data offset register 2
+        volatile uint32_t JOFR3;        // ADC injected channel data offset register 3
+        volatile uint32_t JOFR4;        // ADC injected channel data offset register 4
+        volatile uint32_t HTR;          // ADC watchdog higher threshold register
+        volatile uint32_t LTR;          // ADC watchdog lower threshold register
+        volatile uint32_t SQR1;         // ADC regular sequence register 1
+        volatile uint32_t SQR2;         // ADC regular sequence register 2
+        volatile uint32_t SQR3;         // ADC regular sequence register 3
+        volatile uint32_t JSQR;         // ADC injected sequence register
+        volatile uint32_t JDR1;         // ADC injected data register 1
+        volatile uint32_t JDR2;         // ADC injected data register 2
+        volatile uint32_t JDR3;         // ADC injected data register 3
+        volatile uint32_t JDR4;         // ADC injected data register 4
+        volatile uint32_t DR;           // ADC regular data register
+    };
+
+    // ADC common registers structure
+    struct ADC_Common_Registers {
+        volatile uint32_t CSR;          // ADC common status register
+        volatile uint32_t CCR;          // ADC common control register
+        volatile uint32_t CDR;          // ADC common regular data register for dual and triple modes
+    };
+
+    // ADC_SR register bits
+    enum class SR : uint32_t {
+        AWD = (1UL << 0),        // Analog watchdog flag
+        EOC = (1UL << 1),        // End of conversion
+        JEOC = (1UL << 2),       // End of injected conversion
+        JSTRT = (1UL << 3),      // Injected channel start flag
+        STRT = (1UL << 4),       // Regular channel start flag
+        OVR = (1UL << 5)         // Overrun
+    };
+
+    // ADC_CR1 register bits
+    enum class CR1 : uint32_t {
+        AWDCH_MSK = (0x1FUL << 0),   // Analog watchdog channel select mask
+        EOCIE = (1UL << 5),          // Interrupt enable for EOC
+        AWDIE = (1UL << 6),          // Analog watchdog interrupt enable
+        JEOCIE = (1UL << 7),         // Interrupt enable for JEOC
+        SCAN = (1UL << 8),           // Scan mode
+        AWDSGL = (1UL << 9),         // Enable watchdog on a single channel in scan mode
+        JAUTO = (1UL << 10),         // Automatic injected group conversion
+        DISCEN = (1UL << 11),        // Discontinuous mode on regular channels
+        JDISCEN = (1UL << 12),       // Discontinuous mode on injected channels
+        DISCNUM_MSK = (0x7UL << 13), // Discontinuous mode channel count mask
+        JAWDEN = (1UL << 22),        // Analog watchdog enable on injected channels
+        AWDEN = (1UL << 23),         // Analog watchdog enable on regular channels
+        RES_12BIT = (0UL << 24),     // 12-bit resolution
+        RES_10BIT = (1UL << 24),     // 10-bit resolution
+        RES_8BIT = (2UL << 24),      // 8-bit resolution
+        RES_6BIT = (3UL << 24),      // 6-bit resolution
+        RES_MSK = (3UL << 24),       // Resolution mask
+        OVRIE = (1UL << 26)          // Overrun interrupt enable
+    };
+
+    // ADC_CR2 register bits
+    enum class CR2 : uint32_t {
+        ADON = (1UL << 0),           // A/D converter ON / OFF
+        CONT = (1UL << 1),           // Continuous conversion
+        DMA = (1UL << 8),            // Direct memory access mode
+        DDS = (1UL << 9),            // DMA disable selection
+        EOCS = (1UL << 10),          // End of conversion selection
+        ALIGN = (1UL << 11),         // Data alignment
+        JEXTSEL_MSK = (0xFUL << 16), // External event select for injected group mask
+        JEXTEN_MSK = (0x3UL << 20),  // External trigger enable for injected channels mask
+        JSWSTART = (1UL << 22),      // Start conversion of injected channels
+        EXTSEL_MSK = (0xFUL << 24),  // External event select for regular group mask
+        EXTEN_MSK = (0x3UL << 28),   // External trigger enable for regular channels mask
+        SWSTART = (1UL << 30)        // Start conversion of regular channels
+    };
+
+    // ADC_CCR register bits (Common)
+    enum class CCR : uint32_t {
+        ADCPRE_DIV2 = (0UL << 16),  // PCLK2 divided by 2
+        ADCPRE_DIV4 = (1UL << 16),  // PCLK2 divided by 4
+        ADCPRE_DIV6 = (2UL << 16),  // PCLK2 divided by 6
+        ADCPRE_DIV8 = (3UL << 16),  // PCLK2 divided by 8
+        ADCPRE_MSK = (3UL << 16),   // ADC prescaler mask
+        VBATE = (1UL << 22),        // VBAT enable
+        TSVREFE = (1UL << 23)       // Temperature sensor and VREFINT enable
+    };
+
+    // Helper methods for configuring sample time registers
+    constexpr uint32_t getSMPR1SampleTimeBits(Channel channel, SampleTime time) {
+        // SMPR1 handles channels 10-18
+        uint8_t chIdx = static_cast<uint8_t>(channel);
+        if (chIdx < 10 || chIdx > 18) {
+            return 0; // Not in this register
+        }
+        // Each channel has 3 bits, positioned starting from LSB
+        uint8_t position = (chIdx - 10) * 3;
+        return (static_cast<uint32_t>(time) << position);
+    }
+
+    constexpr uint32_t getSMPR2SampleTimeBits(Channel channel, SampleTime time) {
+        // SMPR2 handles channels 0-9
+        uint8_t chIdx = static_cast<uint8_t>(channel);
+        if (chIdx > 9) {
+            return 0; // Not in this register
+        }
+        // Each channel has 3 bits, positioned starting from LSB
+        uint8_t position = chIdx * 3;
+        return (static_cast<uint32_t>(time) << position);
+    }
+
+    // Helper methods for configuring regular sequence registers
+    constexpr uint32_t setSQR1SequenceBits(uint8_t sqr, Channel channel) {
+        // SQR1 handles 13th-16th conversion in sequence
+        if (sqr < 13 || sqr > 16) {
+            return 0; // Not in this register
+        }
+        uint8_t position = (16 - sqr) * 5; // Positions from right to left
+        return (static_cast<uint32_t>(channel) << position);
+    }
+
+    constexpr uint32_t setSQR2SequenceBits(uint8_t sqr, Channel channel) {
+        // SQR2 handles 7th-12th conversion in sequence
+        if (sqr < 7 || sqr > 12) {
+            return 0; // Not in this register
+        }
+        uint8_t position = (12 - sqr) * 5; // Positions from right to left
+        return (static_cast<uint32_t>(channel) << position);
+    }
+
+    constexpr uint32_t setSQR3SequenceBits(uint8_t sqr, Channel channel) {
+        // SQR3 handles 1st-6th conversion in sequence
+        if (sqr < 1 || sqr > 6) {
+            return 0; // Not in this register
+        }
+        uint8_t position = (6 - sqr) * 5; // Positions from right to left
+        return (static_cast<uint32_t>(channel) << position);
+    }
+
+    // Set sequence length (1-16 conversions) in SQR1
+    constexpr uint32_t setSequenceLength(uint8_t length) {
+        // Length is stored in bits 20-23 of SQR1
+        // Value stored is length-1
+        if (length < 1 || length > 16) {
+            return 0; // Invalid length
+        }
+        return ((length - 1) << 20);
+    }
+
+    // Get ADC registers
+    inline ADC_Registers* getADC1Registers() {
+        return reinterpret_cast<ADC_Registers*>(ADC1_BASE);
+    }
+
+    // Get ADC common registers
+    inline ADC_Common_Registers* getCommonRegisters() {
+        return reinterpret_cast<ADC_Common_Registers*>(ADC_COMMON_BASE);
+    }
+
+    // Helper functions for bit manipulation
+    constexpr uint32_t getBitValue(SR bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(CR1 bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(CR2 bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(CCR bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    // Operator overloads for combining flags
+    constexpr SR operator|(SR a, SR b) {
+        return static_cast<SR>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr CR1 operator|(CR1 a, CR1 b) {
+        return static_cast<CR1>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr CR2 operator|(CR2 a, CR2 b) {
+        return static_cast<CR2>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr CCR operator|(CCR a, CCR b) {
+        return static_cast<CCR>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+}
+
+// -------------------- DMA Definitions --------------------
+
+namespace DMA {
+    constexpr uint32_t DMA1_BASE = (AHB1PERIPH_BASE + 0x6000UL);
+    constexpr uint32_t DMA2_BASE = (AHB1PERIPH_BASE + 0x6400UL);
+    
+    // DMA stream register structure
+    struct DMA_Stream {
+        volatile uint32_t CR;           // DMA stream x configuration register
+        volatile uint32_t NDTR;         // DMA stream x number of data register
+        volatile uint32_t PAR;          // DMA stream x peripheral address register
+        volatile uint32_t M0AR;         // DMA stream x memory 0 address register
+        volatile uint32_t M1AR;         // DMA stream x memory 1 address register
+        volatile uint32_t FCR;          // DMA stream x FIFO control register
+    };
+
+    // DMA register structure
+    struct Registers {
+        volatile uint32_t LISR;          // DMA low interrupt status register
+        volatile uint32_t HISR;          // DMA high interrupt status register
+        volatile uint32_t LIFCR;         // DMA low interrupt flag clear register
+        volatile uint32_t HIFCR;         // DMA high interrupt flag clear register
+        DMA_Stream   STREAM[8];          // DMA streams
+    };
+
+    // Stream identifier (for easier use in APIs)
+    enum class Stream : uint32_t {
+        Stream0 = 0,
+        Stream1 = 1,
+        Stream2 = 2,
+        Stream3 = 3,
+        Stream4 = 4,
+        Stream5 = 5,
+        Stream6 = 6,
+        Stream7 = 7
+    };
+
+    // DMA channel selection (for multiplexed requests)
+    enum class Channel : uint32_t {
+        Channel0 = 0UL << 25,
+        Channel1 = 1UL << 25,
+        Channel2 = 2UL << 25,
+        Channel3 = 3UL << 25,
+        Channel4 = 4UL << 25,
+        Channel5 = 5UL << 25,
+        Channel6 = 6UL << 25,
+        Channel7 = 7UL << 25,
+        ChannelMask = 7UL << 25
+    };
+
+    // Data transfer direction
+    enum class Direction : uint32_t {
+        PeripheralToMemory = 0UL << 6,
+        MemoryToPeripheral = 1UL << 6,
+        MemoryToMemory = 2UL << 6,
+        DirectionMask = 3UL << 6
+    };
+
+    // Data item size
+    enum class DataSize : uint32_t {
+        Byte = 0UL << 11,      // 8-bit
+        HalfWord = 1UL << 11,  // 16-bit
+        Word = 2UL << 11,      // 32-bit
+        SizeMask = 3UL << 11
+    };
+
+    // Memory burst transfer configuration
+    enum class MemoryBurst : uint32_t {
+        Single = 0UL << 23,
+        Incr4 = 1UL << 23,
+        Incr8 = 2UL << 23,
+        Incr16 = 3UL << 23,
+        BurstMask = 3UL << 23
+    };
+
+    // Peripheral burst transfer configuration
+    enum class PeripheralBurst : uint32_t {
+        Single = 0UL << 21,
+        Incr4 = 1UL << 21,
+        Incr8 = 2UL << 21,
+        Incr16 = 3UL << 21,
+        BurstMask = 3UL << 21
+    };
+
+    // FIFO threshold level
+    enum class FIFOThreshold : uint32_t {
+        Quarter = 0UL << 0,
+        Half = 1UL << 0,
+        ThreeQuarters = 2UL << 0,
+        Full = 3UL << 0,
+        ThresholdMask = 3UL << 0
+    };
+
+    // Priority level
+    enum class Priority : uint32_t {
+        Low = 0UL << 16,
+        Medium = 1UL << 16,
+        High = 2UL << 16,
+        VeryHigh = 3UL << 16,
+        PriorityMask = 3UL << 16
+    };
+
+    // DMA_SxCR register bits
+    enum class CR : uint32_t {
+        EN = (1UL << 0),              // Stream enable
+        DMEIE = (1UL << 1),           // Direct mode error interrupt enable
+        TEIE = (1UL << 2),            // Transfer error interrupt enable
+        HTIE = (1UL << 3),            // Half transfer interrupt enable
+        TCIE = (1UL << 4),            // Transfer complete interrupt enable
+        PFCTRL = (1UL << 5),          // Peripheral flow controller
+        DIR_P2M = (0UL << 6),         // Peripheral to memory
+        DIR_M2P = (1UL << 6),         // Memory to peripheral
+        DIR_M2M = (2UL << 6),         // Memory to memory
+        DIR_MSK = (3UL << 6),         // Direction mask
+        CIRC = (1UL << 8),            // Circular mode
+        PINC = (1UL << 9),            // Peripheral increment mode
+        MINC = (1UL << 10),           // Memory increment mode
+        PSIZE_8BIT = (0UL << 11),     // Peripheral data size: Byte (8-bits)
+        PSIZE_16BIT = (1UL << 11),    // Peripheral data size: Half-word (16-bits)
+        PSIZE_32BIT = (2UL << 11),    // Peripheral data size: Word (32-bits)
+        PSIZE_MSK = (3UL << 11),      // Peripheral data size mask
+        MSIZE_8BIT = (0UL << 13),     // Memory data size: Byte (8-bits)
+        MSIZE_16BIT = (1UL << 13),    // Memory data size: Half-word (16-bits)
+        MSIZE_32BIT = (2UL << 13),    // Memory data size: Word (32-bits)
+        MSIZE_MSK = (3UL << 13),      // Memory data size mask
+        PINCOS = (1UL << 15),         // Peripheral increment offset size
+        PL_LOW = (0UL << 16),         // Priority level: Low
+        PL_MEDIUM = (1UL << 16),      // Priority level: Medium
+        PL_HIGH = (2UL << 16),        // Priority level: High
+        PL_VERY_HIGH = (3UL << 16),   // Priority level: Very high
+        PL_MSK = (3UL << 16),         // Priority level mask
+        DBM = (1UL << 18),            // Double buffer mode
+        CT = (1UL << 19),             // Current target (only in double buffer mode)
+        PBURST_SINGLE = (0UL << 21),  // Peripheral burst: Single transfer
+        PBURST_INCR4 = (1UL << 21),   // Peripheral burst: Incremental burst of 4 beats
+        PBURST_INCR8 = (2UL << 21),   // Peripheral burst: Incremental burst of 8 beats
+        PBURST_INCR16 = (3UL << 21),  // Peripheral burst: Incremental burst of 16 beats
+        PBURST_MSK = (3UL << 21),     // Peripheral burst mask
+        MBURST_SINGLE = (0UL << 23),  // Memory burst: Single transfer
+        MBURST_INCR4 = (1UL << 23),   // Memory burst: Incremental burst of 4 beats
+        MBURST_INCR8 = (2UL << 23),   // Memory burst: Incremental burst of 8 beats
+        MBURST_INCR16 = (3UL << 23),  // Memory burst: Incremental burst of 16 beats
+        MBURST_MSK = (3UL << 23),     // Memory burst mask
+        CHSEL_0 = (0UL << 25),        // Channel 0 selection
+        CHSEL_1 = (1UL << 25),        // Channel 1 selection
+        CHSEL_2 = (2UL << 25),        // Channel 2 selection
+        CHSEL_3 = (3UL << 25),        // Channel 3 selection
+        CHSEL_4 = (4UL << 25),        // Channel 4 selection
+        CHSEL_5 = (5UL << 25),        // Channel 5 selection
+        CHSEL_6 = (6UL << 25),        // Channel 6 selection
+        CHSEL_7 = (7UL << 25),        // Channel 7 selection
+        CHSEL_MSK = (7UL << 25)       // Channel selection mask
+    };
+
+    // DMA_SxFCR register bits
+    enum class FCR : uint32_t {
+        FTH_1_4 = (0UL << 0),          // FIFO threshold: 1/4 full
+        FTH_1_2 = (1UL << 0),          // FIFO threshold: 1/2 full
+        FTH_3_4 = (2UL << 0),          // FIFO threshold: 3/4 full
+        FTH_FULL = (3UL << 0),         // FIFO threshold: Full
+        FTH_MSK = (3UL << 0),          // FIFO threshold mask
+        DMDIS = (1UL << 2),            // Direct mode disable
+        FS_LT_1_4 = (0UL << 3),        // FIFO status: Less than 1/4 full
+        FS_1_4_TO_1_2 = (1UL << 3),    // FIFO status: 1/4 to 1/2 full
+        FS_1_2_TO_3_4 = (2UL << 3),    // FIFO status: 1/2 to 3/4 full
+        FS_3_4_TO_FULL = (3UL << 3),   // FIFO status: 3/4 full to full
+        FS_EMPTY = (4UL << 3),         // FIFO status: Empty
+        FS_FULL = (5UL << 3),          // FIFO status: Full
+        FS_MSK = (7UL << 3),           // FIFO status mask
+        FEIE = (1UL << 7)              // FIFO error interrupt enable
+    };
+
+    // DMA LISR/HISR register bits layout (per stream)
+    enum class ISR_Bits : uint32_t {
+        FEIF0 = (1UL << 0),           // Stream 0 FIFO error interrupt flag
+        DMEIF0 = (1UL << 2),          // Stream 0 direct mode error interrupt flag
+        TEIF0 = (1UL << 3),           // Stream 0 transfer error interrupt flag
+        HTIF0 = (1UL << 4),           // Stream 0 half transfer interrupt flag
+        TCIF0 = (1UL << 5),           // Stream 0 transfer complete interrupt flag
+        FEIF1 = (1UL << 6),           // Stream 1 FIFO error interrupt flag
+        DMEIF1 = (1UL << 8),          // Stream 1 direct mode error interrupt flag
+        TEIF1 = (1UL << 9),           // Stream 1 transfer error interrupt flag
+        HTIF1 = (1UL << 10),          // Stream 1 half transfer interrupt flag
+        TCIF1 = (1UL << 11),          // Stream 1 transfer complete interrupt flag
+        FEIF2 = (1UL << 16),          // Stream 2 FIFO error interrupt flag
+        DMEIF2 = (1UL << 18),         // Stream 2 direct mode error interrupt flag
+        TEIF2 = (1UL << 19),          // Stream 2 transfer error interrupt flag
+        HTIF2 = (1UL << 20),          // Stream 2 half transfer interrupt flag
+        TCIF2 = (1UL << 21),          // Stream 2 transfer complete interrupt flag
+        FEIF3 = (1UL << 22),          // Stream 3 FIFO error interrupt flag
+        DMEIF3 = (1UL << 24),         // Stream 3 direct mode error interrupt flag
+        TEIF3 = (1UL << 25),          // Stream 3 transfer error interrupt flag
+        HTIF3 = (1UL << 26),          // Stream 3 half transfer interrupt flag
+        TCIF3 = (1UL << 27)           // Stream 3 transfer complete interrupt flag
+    };
+
+    // DMA LIFCR/HIFCR register bits layout (per stream)
+    enum class IFCR_Bits : uint32_t {
+        CFEIF0 = (1UL << 0),          // Stream 0 clear FIFO error interrupt flag
+        CDMEIF0 = (1UL << 2),         // Stream 0 clear direct mode error interrupt flag
+        CTEIF0 = (1UL << 3),          // Stream 0 clear transfer error interrupt flag
+        CHTIF0 = (1UL << 4),          // Stream 0 clear half transfer interrupt flag
+        CTCIF0 = (1UL << 5),          // Stream 0 clear transfer complete interrupt flag
+        CFEIF1 = (1UL << 6),          // Stream 1 clear FIFO error interrupt flag
+        CDMEIF1 = (1UL << 8),         // Stream 1 clear direct mode error interrupt flag
+        CTEIF1 = (1UL << 9),          // Stream 1 clear transfer error interrupt flag
+        CHTIF1 = (1UL << 10),         // Stream 1 clear half transfer interrupt flag
+        CTCIF1 = (1UL << 11),         // Stream 1 clear transfer complete interrupt flag
+        CFEIF2 = (1UL << 16),         // Stream 2 clear FIFO error interrupt flag
+        CDMEIF2 = (1UL << 18),        // Stream 2 clear direct mode error interrupt flag
+        CTEIF2 = (1UL << 19),         // Stream 2 clear transfer error interrupt flag
+        CHTIF2 = (1UL << 20),         // Stream 2 clear half transfer interrupt flag
+        CTCIF2 = (1UL << 21),         // Stream 2 clear transfer complete interrupt flag
+        CFEIF3 = (1UL << 22),         // Stream 3 clear FIFO error interrupt flag
+        CDMEIF3 = (1UL << 24),        // Stream 3 clear direct mode error interrupt flag
+        CTEIF3 = (1UL << 25),         // Stream 3 clear transfer error interrupt flag
+        CHTIF3 = (1UL << 26),         // Stream 3 clear half transfer interrupt flag
+        CTCIF3 = (1UL << 27)          // Stream 3 clear transfer complete interrupt flag
+    };
+
+    // Get DMA registers
+    inline Registers* getDMA1Registers() {
+        return reinterpret_cast<Registers*>(DMA1_BASE);
+    }
+
+    inline Registers* getDMA2Registers() {
+        return reinterpret_cast<Registers*>(DMA2_BASE);
+    }
+
+    // Get specific stream configuration register
+    inline DMA_Stream* getStream(int controller, Stream stream) {
+        if (controller == 1) {
+            return &(getDMA1Registers()->STREAM[static_cast<uint32_t>(stream)]);
+        } else if (controller == 2) {
+            return &(getDMA2Registers()->STREAM[static_cast<uint32_t>(stream)]);
+        }
+        return nullptr;
+    }
+
+    // Helper functions for bit manipulation
+    constexpr uint32_t getBitValue(CR bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(FCR bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(ISR_Bits bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(IFCR_Bits bit) {
+        return static_cast<uint32_t>(bit);
+    }
+
+    constexpr uint32_t getBitValue(Channel channel) {
+        return static_cast<uint32_t>(channel);
+    }
+
+    constexpr uint32_t getBitValue(Direction direction) {
+        return static_cast<uint32_t>(direction);
+    }
+
+    constexpr uint32_t getBitValue(DataSize size) {
+        return static_cast<uint32_t>(size);
+    }
+
+    constexpr uint32_t getBitValue(Priority priority) {
+        return static_cast<uint32_t>(priority);
+    }
+
+    // Operator overloads for combining flags
+    constexpr CR operator|(CR a, CR b) {
+        return static_cast<CR>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr FCR operator|(FCR a, FCR b) {
+        return static_cast<FCR>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr ISR_Bits operator|(ISR_Bits a, ISR_Bits b) {
+        return static_cast<ISR_Bits>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    constexpr IFCR_Bits operator|(IFCR_Bits a, IFCR_Bits b) {
+        return static_cast<IFCR_Bits>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    // Helper functions to check interrupt flags for specific streams
+    inline bool isTransferComplete(int controller, Stream stream) {
+        const auto streamIdx = static_cast<uint32_t>(stream);
+        if (streamIdx < 4) {
+            // Streams 0-3 are in LISR
+            const uint32_t bitPos = 5 + (streamIdx * 6); // TCIF bit positions
+            return (controller == 1) ? 
+                (getDMA1Registers()->LISR & (1UL << bitPos)) :
+                (getDMA2Registers()->LISR & (1UL << bitPos));
+        } else {
+            // Streams 4-7 are in HISR
+            const uint32_t bitPos = 5 + ((streamIdx - 4) * 6); // TCIF bit positions
+            return (controller == 1) ? 
+                (getDMA1Registers()->HISR & (1UL << bitPos)) :
+                (getDMA2Registers()->HISR & (1UL << bitPos));
+        }
+    }
+
+    // Helper function to clear all interrupt flags for a stream
+    inline void clearAllFlags(int controller, Stream stream) {
+        const auto streamIdx = static_cast<uint32_t>(stream);
+        if (streamIdx < 4) {
+            // Streams 0-3 are in LIFCR
+            const uint32_t flagsMask = 0x3D << (streamIdx * 6); // All flags for this stream
+            if (controller == 1) {
+                getDMA1Registers()->LIFCR = flagsMask;
+            } else {
+                getDMA2Registers()->LIFCR = flagsMask;
+            }
+        } else {
+            // Streams 4-7 are in HIFCR
+            const uint32_t flagsMask = 0x3D << ((streamIdx - 4) * 6); // All flags for this stream
+            if (controller == 1) {
+                getDMA1Registers()->HIFCR = flagsMask;
+            } else {
+                getDMA2Registers()->HIFCR = flagsMask;
+            }
+        }
+    }
+}
 // -------------------- Flash Definitions --------------------
 
 namespace FLASH {
