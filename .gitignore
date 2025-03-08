@@ -1,0 +1,29 @@
+# Build outputs
+build/
+*.o
+*.d
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*~
+
+# Debug files
+*.gdb*
+.gdb_history
+
+# Generated files
+*.bak
+
+# Temporary files
+*.tmp
+
+# System files
+.DS_Store
+Thumbs.db
