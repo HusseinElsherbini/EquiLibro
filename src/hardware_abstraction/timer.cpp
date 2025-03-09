@@ -1,561 +1,357 @@
-﻿// timer.cpp
+﻿// timer_interface.cpp - partial implementation showing key changes
+
 #include "hardware_abstraction/timer.hpp"
 #include "hardware_abstraction/rcc.hpp"
-#include "common/platform.hpp"
+#include <vector>
+#include <mutex>
+#include <memory>
 
+// Static instance management with shared_ptr
+static std::vector<std::weak_ptr<TimerInterface>> timer_instances(Platform::TIM::TIM_CHANNEL_COUNT);
+static std::mutex timer_instances_mutex;
 
-
-// Array of TimerInterface instances (one per timer)
-static TimerInterface* timerInstances[Platform::TIM::TIM_CHANNEL_COUNT] = {nullptr};
-
-// Constructor
+// Constructor with timer type detection
 TimerInterface::TimerInterface(uint8_t instance) 
     : initialized(false), 
-      timerInstance(instance) {
+      timer_instance(instance),
+      is_running(false) {
     
-    // Initialize callbacks array
+    // Detect timer type and available features
+    timer_type = Platform::TIM::getTimerType(instance);
+    available_channels = Platform::TIM::getTimerChannelCount(instance);
+    
+    // Initialize callback table
     for (auto& cb : callbacks) {
         cb.callback = nullptr;
         cb.param = nullptr;
+        cb.enabled = false;
     }
+    
+    // Initialize status
+    status = {};
 }
 
-// Destructor
+// Destructor with proper cleanup
 TimerInterface::~TimerInterface() {
     if (initialized) {
+        // Ensure timer is stopped before destruction
+        Stop();
         DeInit();
     }
 }
 
-// Get TimerInterface singleton for a specific timer instance
-TimerInterface& TimerInterface::GetInstance(uint8_t instance) {
-    if (instance < 1 || instance > 5) {
-        // Invalid instance, return timer 1 as fallback
-        instance = 1;
+// Safe singleton factory with shared_ptr
+std::shared_ptr<TimerInterface> TimerInterface::GetInstance(uint8_t instance) {
+    if (!Platform::TIM::isValidTimerInstance(instance)) {
+        // Return nullptr for invalid instances instead of defaulting to another timer
+        return nullptr;
     }
     
-    // Create instance if it doesn't exist
-    if (timerInstances[instance - 1] == nullptr) {
-        timerInstances[instance - 1] = new TimerInterface(instance);
+    std::lock_guard<std::mutex> lock(timer_instances_mutex);
+    
+    // Convert to zero-based index
+    size_t index = instance - 1;
+    
+    // Check if we already have a non-expired weak_ptr
+    auto timer_ptr = timer_instances[index].lock();
+    if (!timer_ptr) {
+        // Create a new instance if none exists or the previous one expired
+        timer_ptr = std::make_shared<TimerInterface>(instance);
+        timer_instances[index] = timer_ptr;
     }
     
-    return *timerInstances[instance - 1];
+    return timer_ptr;
 }
 
-// Get timer peripheral registers
-Platform::TIM::Registers* TimerInterface::GetTimerRegister() {
-    return Platform::TIM::getTimer(timerInstance);
-}
-
-// Enable clock to the timer peripheral
-Platform::Status TimerInterface::EnableClock() {
-    RccInterface& rcc = RccInterface::GetInstance();
+// Release unused timers
+void TimerInterface::ReleaseUnusedTimers() {
+    std::lock_guard<std::mutex> lock(timer_instances_mutex);
     
-    // Map timer instance to RCC peripheral
-    Platform::RCC::RccPeripheral rccPeripheral;
-    switch (timerInstance) {
-        case 1:
-            rccPeripheral = Platform::RCC::RccPeripheral::TIM1;
-            break;
-        case 2:
-            rccPeripheral = Platform::RCC::RccPeripheral::TIM2;
-            break;
-        case 3:
-            rccPeripheral = Platform::RCC::RccPeripheral::TIM3;
-            break;
-        case 4:
-            rccPeripheral = Platform::RCC::RccPeripheral::TIM4;
-            break;
-        case 5:
-            rccPeripheral = Platform::RCC::RccPeripheral::TIM5;
-            break;
-        default:
-            return Platform::Status::INVALID_PARAM;
-    }
-    
-    // Enable the peripheral clock
-    return rcc.EnablePeripheralClock(rccPeripheral);
-}
-
-// Configure a timer channel
-Platform::Status TimerInterface::ConfigureChannel(Platform::TIM::Registers* tim, const TimerChannelConfig& channelConfig) {
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    uint32_t ccmrx_offset;
-    uint32_t ccer_bit_offset;
-    
-    // Determine which CCMR register to use based on channel
-    if (static_cast<int>(channelConfig.channel) <= 2) {
-        ccmrx_offset = 0; // CCMR1
-    } else {
-        ccmrx_offset = 1; // CCMR2
-    }
-    
-    // Calculate bit positions within the register
-    uint32_t ccmr_channel_offset = ((static_cast<int>(channelConfig.channel) - 1) % 2) * 8;
-    ccer_bit_offset = (static_cast<int>(channelConfig.channel) - 1) * 4;
-    
-    // Configure the output compare mode
-    if (ccmrx_offset == 0) {
-        // CCMR1 register
-        uint32_t ccmr1 = tim->CCMR1;
-        ccmr1 &= ~(0x7UL << (ccmr_channel_offset + 4));
-        ccmr1 |= (static_cast<uint32_t>(channelConfig.ocMode) << (ccmr_channel_offset + 4));
-        
-        // Configure output compare preload
-        if (channelConfig.ocPreload) {
-            ccmr1 |= (1UL << (ccmr_channel_offset + 3));
-        } else {
-            ccmr1 &= ~(1UL << (ccmr_channel_offset + 3));
+    for (auto& weak_timer : timer_instances) {
+        if (weak_timer.expired()) {
+            // This is already handled by shared_ptr, just making the expired
+            // state explicit
+            weak_timer.reset();
         }
-        
-        tim->CCMR1 = ccmr1;
-    } else {
-        // CCMR2 register
-        uint32_t ccmr2 = tim->CCMR2;
-        ccmr2 &= ~(0x7UL << (ccmr_channel_offset + 4));
-        ccmr2 |= (static_cast<uint32_t>(channelConfig.ocMode) << (ccmr_channel_offset + 4));
-        
-        // Configure output compare preload
-        if (channelConfig.ocPreload) {
-            ccmr2 |= (1UL << (ccmr_channel_offset + 3));
-        } else {
-            ccmr2 &= ~(1UL << (ccmr_channel_offset + 3));
-        }
-        
-        tim->CCMR2 = ccmr2;
     }
-    
-    // Set capture/compare register value
-    switch (channelConfig.channel) {
-        case Platform::TIM::Channel::Channel1:
-            tim->CCR1 = channelConfig.pulse;
-            break;
-        case Platform::TIM::Channel::Channel2:
-            tim->CCR2 = channelConfig.pulse;
-            break;
-        case Platform::TIM::Channel::Channel3:
-            tim->CCR3 = channelConfig.pulse;
-            break;
-        case Platform::TIM::Channel::Channel4:
-            tim->CCR4 = channelConfig.pulse;
-            break;
-        default:
-            return Platform::Status::INVALID_PARAM;
-    }
-    
-    // Enable/disable complementary output
-    uint32_t ccer = tim->CCER;
-    if (channelConfig.complementaryOutput) {
-        ccer |= (1UL << (ccer_bit_offset + 2));
-    } else {
-        ccer &= ~(1UL << (ccer_bit_offset + 2));
-    }
-    
-    // Enable channel
-    ccer |= (1UL << ccer_bit_offset);
-    tim->CCER = ccer;
-    
-    return Platform::Status::OK;
 }
 
-// Initialize timer
-Platform::Status TimerInterface::Init(void* config) {
-    // Check if already initialized
-    if (initialized) {
-        return Platform::Status::OK; // Already initialized
-    }
-    
-    TimerConfig* timerConfig = static_cast<TimerConfig*>(config);
-    if (timerConfig == nullptr) {
-        return Platform::Status::INVALID_PARAM;
-    }
-    
-    // Get timer registers
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::INVALID_PARAM;
-    }
-    
-    // Save the configuration
-    this->config = *timerConfig;
-    
-    // Enable timer clock
-    Platform::Status status = EnableClock();
-    if (status != Platform::Status::OK) {
-        return status;
-    }
-    
-    // Reset timer registers
-    tim->CR1 = 0;
-    
-    // Configure clock division
-    uint32_t clock_div_bits;
-    switch (timerConfig->clockDivision) {
-        case Platform::TIM::ClockDivision::Div1: clock_div_bits = 0; break;
-        case Platform::TIM::ClockDivision::Div2: clock_div_bits = 1; break;
-        case Platform::TIM::ClockDivision::Div4: clock_div_bits = 2; break;
-        default: return Platform::Status::INVALID_PARAM;
-    }
-    
-    uint32_t cr1 = tim->CR1;
-    cr1 &= ~Platform::TIM::getBitValue(Platform::TIM::CR1::CKD_MSK);
-    cr1 |= (clock_div_bits << 8);
-    
-    // Configure counter direction
-    uint32_t dir_bit = (timerConfig->direction == Platform::TIM::Direction::Down) ? 1 : 0;
-    cr1 &= ~Platform::TIM::getBitValue(Platform::TIM::CR1::DIR);
-    cr1 |= (dir_bit << 4);
-    
-    // Configure alignment mode
-    uint32_t align_bits;
-    switch (timerConfig->alignment) {
-        case Platform::TIM::Alignment::Edge:    align_bits = 0; break;
-        case Platform::TIM::Alignment::Center1: align_bits = 1; break;
-        case Platform::TIM::Alignment::Center2: align_bits = 2; break;
-        case Platform::TIM::Alignment::Center3: align_bits = 3; break;
-        default: return Platform::Status::INVALID_PARAM;
-    }
-    cr1 &= ~Platform::TIM::getBitValue(Platform::TIM::CR1::CMS_MSK);
-    cr1 |= (align_bits << 5);
-    
-    // Configure auto-reload preload
-    if (timerConfig->autoReloadPreload) {
-        cr1 |= Platform::TIM::getBitValue(Platform::TIM::CR1::ARPE);
-    } else {
-        cr1 &= ~Platform::TIM::getBitValue(Platform::TIM::CR1::ARPE);
-    }
-    
-    // Apply CR1 configuration
-    tim->CR1 = cr1;
-    
-    // Set prescaler
-    tim->PSC = timerConfig->prescaler;
-    
-    // Set auto-reload value (period)
-    tim->ARR = timerConfig->period;
-    
-    // Generate update event to load prescaler and period
-    tim->EGR = Platform::TIM::getBitValue(Platform::TIM::EGR::UG);
-    
-    // Mark as initialized
-    initialized = true;
-    
-    return Platform::Status::OK;
-}
-
-// Deinitialize timer
-Platform::Status TimerInterface::DeInit() {
-    if (!initialized) {
+// Enhanced control method with type-safe command enumeration
+// Timer interface control function with type-safe enum
+Platform::Status TimerInterface::Control(TimerOperation operation, void* param) {
+    if (!initialized && operation != TimerOperation::Start) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
+    Platform::Status status = Platform::Status::OK;
+    
+    switch (operation) {
+        case TimerOperation::Start:
+            status = Start();
+            break;
+            
+        case TimerOperation::Stop:
+            status = Stop();
+            break;
+            
+        case TimerOperation::ConfigureChannel:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            status = ConfigureChannel(*static_cast<TimerChannelConfig*>(param));
+            break;
+            
+        case TimerOperation::SetPeriod:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            status = SetPeriod(*static_cast<uint32_t*>(param));
+            break;
+            
+        case TimerOperation::SetPrescaler:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            status = SetPrescaler(*static_cast<uint32_t*>(param));
+            break;
+            
+        case TimerOperation::SetCompareValue:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            {
+                TimerCompareConfig* compare_config = static_cast<TimerCompareConfig*>(param);
+                
+                Platform::TIM::Registers* tim = GetTimerRegister();
+                if (tim == nullptr) {
+                    return Platform::Status::ERROR;
+                }
+                
+                // Set the compare value for the specified channel
+                switch (compare_config->channel) {
+                    case Channel::Channel1:
+                        tim->CCR1 = compare_config->value;
+                        break;
+                    case Channel::Channel2:
+                        tim->CCR2 = compare_config->value;
+                        break;
+                    case Channel::Channel3:
+                        tim->CCR3 = compare_config->value;
+                        break;
+                    case Channel::Channel4:
+                        tim->CCR4 = compare_config->value;
+                        break;
+                    default:
+                        return Platform::Status::INVALID_PARAM;
+                }
+            }
+            break;
+            
+        case TimerOperation::EnableInterrupt:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            status = EnableInterrupt(*static_cast<TimerEvent*>(param));
+            break;
+            
+        case TimerOperation::DisableInterrupt:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            status = DisableInterrupt(*static_cast<TimerEvent*>(param));
+            break;
+            
+        case TimerOperation::ReadCounter:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            status = GetCounterValue(*static_cast<uint32_t*>(param));
+            break;
+            
+        case TimerOperation::WriteCounter:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            status = SetCounterValue(*static_cast<uint32_t*>(param));
+            break;
+            
+        case TimerOperation::EnableCapture:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            {
+                Channel* channel = static_cast<Channel*>(param);
+                Platform::TIM::Registers* tim = GetTimerRegister();
+                if (tim == nullptr) {
+                    return Platform::Status::ERROR;
+                }
+                
+                // Enable capture for the specified channel
+                uint32_t channel_bit = static_cast<uint32_t>(*channel) * 4;
+                LockAccess();
+                Platform::setBit(tim->CCER, (1UL << channel_bit));
+                UnlockAccess();
+            }
+            break;
+            
+        case TimerOperation::DisableCapture:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            {
+                Channel* channel = static_cast<Channel*>(param);
+                Platform::TIM::Registers* tim = GetTimerRegister();
+                if (tim == nullptr) {
+                    return Platform::Status::ERROR;
+                }
+                
+                // Disable capture for the specified channel
+                uint32_t channel_bit = static_cast<uint32_t>(*channel) * 4;
+                //LockAccess();
+                Platform::clearBit(tim->CCER, (1UL << channel_bit));
+                //UnlockAccess();
+            }
+            break;
+            
+        case TimerOperation::GetStatus:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            {
+                TimerStatus* timer_status = static_cast<TimerStatus*>(param);
+                Platform::TIM::Registers* tim = GetTimerRegister();
+                if (tim == nullptr) {
+                    return Platform::Status::ERROR;
+                }
+                
+                // Fill in the status structure
+                //LockAccess();
+                timer_status->counter_value = tim->CNT;
+                timer_status->prescaler_value = tim->PSC;
+                timer_status->period_value = tim->ARR;
+                timer_status->is_running = (tim->CR1 & (1UL << 0)) != 0;
+                timer_status->flags = tim->SR;
+                //UnlockAccess();
+            }
+            break;
+            
+        default:
+            return Platform::Status::NOT_SUPPORTED;
     }
     
-    // Disable counter
-    tim->CR1 &= ~Platform::TIM::getBitValue(Platform::TIM::CR1::CEN);
-    
-    // Reset all registers
-    tim->CR1 = 0;
-    tim->CR2 = 0;
-    tim->SMCR = 0;
-    tim->DIER = 0;
-    tim->SR = 0;
-    tim->EGR = 0;
-    tim->CCMR1 = 0;
-    tim->CCMR2 = 0;
-    tim->CCER = 0;
-    tim->CNT = 0;
-    tim->PSC = 0;
-    tim->ARR = 0;
-    tim->CCR1 = 0;
-    tim->CCR2 = 0;
-    tim->CCR3 = 0;
-    tim->CCR4 = 0;
-    
-    // Mark as not initialized
-    initialized = false;
-    
-    return Platform::Status::OK;
+    return status;
 }
 
-// Control timer
+// Backward compatibility for HwInterface
 Platform::Status TimerInterface::Control(uint32_t command, void* param) {
-    if (!initialized && command != TIMER_CTRL_START) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
+    // Map old uint32_t commands to new TimerOperation enum
     switch (command) {
-        case TIMER_CTRL_START:
-            return Start();
+        case 0x0201: // TIMER_CTRL_START
+            return Control(TimerOperation::Start, param);
             
-        case TIMER_CTRL_STOP:
-            return Stop();
+        case 0x0202: // TIMER_CTRL_STOP
+            return Control(TimerOperation::Stop, param);
             
-        case TIMER_CTRL_CONFIG_CHANNEL:
-            if (param == nullptr) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            return ConfigureChannel(*static_cast<TimerChannelConfig*>(param));
+        case 0x0203: // TIMER_CTRL_CONFIG_CHANNEL
+            return Control(TimerOperation::ConfigureChannel, param);
             
-        case TIMER_CTRL_SET_PERIOD:
-            if (param == nullptr) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            return SetPeriod(*static_cast<uint32_t*>(param));
+        case 0x0204: // TIMER_CTRL_SET_PERIOD
+            return Control(TimerOperation::SetPeriod, param);
             
-        case TIMER_CTRL_SET_PRESCALER:
-            if (param == nullptr) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            return SetPrescaler(*static_cast<uint32_t*>(param));
+        case 0x0205: // TIMER_CTRL_SET_PRESCALER
+            return Control(TimerOperation::SetPrescaler, param);
             
-        case TIMER_CTRL_ENABLE_IT:
-            if (param == nullptr) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            return EnableInterrupt(*static_cast<TimerEvent*>(param));
-            
-        case TIMER_CTRL_DISABLE_IT:
-            if (param == nullptr) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            return DisableInterrupt(*static_cast<TimerEvent*>(param));
+        // Map other old commands...
             
         default:
             return Platform::Status::NOT_SUPPORTED;
     }
 }
 
-// Read timer counter value
+// Replace generic Read with explicit counter operations
 Platform::Status TimerInterface::Read(void* buffer, uint16_t size, uint32_t timeout) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
     if (buffer == nullptr || size < sizeof(uint32_t)) {
         return Platform::Status::INVALID_PARAM;
     }
     
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    // Read current counter value
-    *static_cast<uint32_t*>(buffer) = tim->CNT;
-    
-    return Platform::Status::OK;
+    return GetCounterValue(*static_cast<uint32_t*>(buffer));
 }
 
-// Write to timer counter
+// Replace generic Write with explicit counter operations
 Platform::Status TimerInterface::Write(const void* data, uint16_t size, uint32_t timeout) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
     if (data == nullptr || size < sizeof(uint32_t)) {
         return Platform::Status::INVALID_PARAM;
     }
     
+    return SetCounterValue(*static_cast<const uint32_t*>(data));
+}
+
+// Explicit counter value access methods
+Platform::Status TimerInterface::GetCounterValue(uint32_t& value) {
+    if (!initialized) {
+        return Platform::Status::NOT_INITIALIZED;
+    }
+    
     Platform::TIM::Registers* tim = GetTimerRegister();
     if (tim == nullptr) {
         return Platform::Status::ERROR;
     }
     
-    // Write to counter register
-    tim->CNT = *static_cast<const uint32_t*>(data);
+    // Thread-safe access
+    //LockAccess();
+    value = tim->CNT;
+    //UnlockAccess();
     
     return Platform::Status::OK;
 }
 
-// Register callback for timer events
-Platform::Status TimerInterface::RegisterCallback(uint32_t eventId, void (*callback)(void* param), void* param) {
+Platform::Status TimerInterface::SetCounterValue(uint32_t value) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
-    if (eventId >= 7) { // We have 7 callback slots (UPDATE, CC1-4, TRIGGER, BREAK)
+    Platform::TIM::Registers* tim = GetTimerRegister();
+    if (tim == nullptr) {
+        return Platform::Status::ERROR;
+    }
+    
+    // Check if the value is within valid range based on timer type
+    if (!Platform::TIM::hasTimer32BitCounter(timer_instance) && value > 0xFFFF) {
         return Platform::Status::INVALID_PARAM;
     }
     
-    // Register the callback
-    callbacks[eventId].callback = callback;
-    callbacks[eventId].param = param;
+    // Thread-safe access
+    //LockAccess();
+    tim->CNT = value;
+    //UnlockAccess();
     
     return Platform::Status::OK;
 }
 
-// Start timer
-Platform::Status TimerInterface::Start() {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    // Start the timer
-    tim->CR1 |= Platform::TIM::getBitValue(Platform::TIM::CR1::CEN);
-    
-    return Platform::Status::OK;
-}
-
-// Stop timer
-Platform::Status TimerInterface::Stop() {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    // Stop the timer
-    tim->CR1 &= ~Platform::TIM::getBitValue(Platform::TIM::CR1::CEN);
-    
-    return Platform::Status::OK;
-}
-
-// Set timer period
-Platform::Status TimerInterface::SetPeriod(uint32_t period) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    // Set auto-reload value
-    tim->ARR = period;
-    
-    // Update the stored configuration
-    config.period = period;
-    
-    return Platform::Status::OK;
-}
-
-// Set timer prescaler
-Platform::Status TimerInterface::SetPrescaler(uint32_t prescaler) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    // Set prescaler value
-    tim->PSC = prescaler;
-    
-    // Update the stored configuration
-    config.prescaler = prescaler;
-    
-    return Platform::Status::OK;
-}
-
-// Configure a timer channel
-Platform::Status TimerInterface::ConfigureChannel(const TimerChannelConfig& channelConfig) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    return ConfigureChannel(tim, channelConfig);
-}
-
-// Enable timer interrupt
-Platform::Status TimerInterface::EnableInterrupt(TimerEvent event) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    // Enable interrupt based on event type
-    switch (event) {
-        case TimerEvent::Update:
-            tim->DIER |= Platform::TIM::getBitValue(Platform::TIM::DIER::UIE);
-            break;
-        case TimerEvent::CC1:
-            tim->DIER |= Platform::TIM::getBitValue(Platform::TIM::DIER::CC1IE);
-            break;
-        case TimerEvent::CC2:
-            tim->DIER |= Platform::TIM::getBitValue(Platform::TIM::DIER::CC2IE);
-            break;
-        case TimerEvent::CC3:
-            tim->DIER |= Platform::TIM::getBitValue(Platform::TIM::DIER::CC3IE);
-            break;
-        case TimerEvent::CC4:
-            tim->DIER |= Platform::TIM::getBitValue(Platform::TIM::DIER::CC4IE);
-            break;
-        case TimerEvent::Trigger:
-            tim->DIER |= Platform::TIM::getBitValue(Platform::TIM::DIER::TIE);
-            break;
+// TODO: Implement other timer operations...
+// timer_interface.cpp - partial implementation showing key changes
+// Feature check method
+bool TimerInterface::SupportsFeature(TimerFeature feature) const {
+    switch (feature) {
+        case TimerFeature::PWM:
+            // All timers support PWM except basic timers
+            return timer_type != TimerType::Basic;
+            
+        case TimerFeature::OnePulse:
+            // All timers support one-pulse mode
+            return true;
+            
+        case TimerFeature::BreakFunction:
+            // Only advanced timers support break function
+            return timer_type == TimerType::Advanced;
+            
+        case TimerFeature::DMA:
+            // All timers except TIM9, TIM10, TIM11 support DMA
+            return timer_instance <= 5;
+            
+        // Check other features...
+            
         default:
-            return Platform::Status::INVALID_PARAM;
+            return false;
     }
-    
-    return Platform::Status::OK;
-}
-
-// Disable timer interrupt
-Platform::Status TimerInterface::DisableInterrupt(TimerEvent event) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
-    Platform::TIM::Registers* tim = GetTimerRegister();
-    if (tim == nullptr) {
-        return Platform::Status::ERROR;
-    }
-    
-    // Disable interrupt based on event type
-    switch (event) {
-        case TimerEvent::Update:
-            tim->DIER &= ~Platform::TIM::getBitValue(Platform::TIM::DIER::UIE);
-            break;
-        case TimerEvent::CC1:
-            tim->DIER &= ~Platform::TIM::getBitValue(Platform::TIM::DIER::CC1IE);
-            break;
-        case TimerEvent::CC2:
-            tim->DIER &= ~Platform::TIM::getBitValue(Platform::TIM::DIER::CC2IE);
-            break;
-        case TimerEvent::CC3:
-            tim->DIER &= ~Platform::TIM::getBitValue(Platform::TIM::DIER::CC3IE);
-            break;
-        case TimerEvent::CC4:
-            tim->DIER &= ~Platform::TIM::getBitValue(Platform::TIM::DIER::CC4IE);
-            break;
-        case TimerEvent::Trigger:
-            tim->DIER &= ~Platform::TIM::getBitValue(Platform::TIM::DIER::TIE);
-            break;
-        default:
-            return Platform::Status::INVALID_PARAM;
-    }
-    
-    return Platform::Status::OK;
 }
