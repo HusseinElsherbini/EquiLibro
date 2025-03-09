@@ -246,7 +246,8 @@ namespace TIM {
         CC3,        // Capture/Compare 3 event
         CC4,        // Capture/Compare 4 event
         Trigger,    // Trigger event
-        Break       // Break event
+        Break,      // Break event
+        Count,      // number of events
     };
     // CCMR1 register bit positions and masks (Input Mode)
     enum class CCMR1_Input : uint32_t {
