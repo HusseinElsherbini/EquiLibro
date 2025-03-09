@@ -4,44 +4,21 @@
 
 #include "hw_interface.hpp"
 #include "common/platform.hpp"
-
-// Forward declarations
-namespace Platform {
-    enum class Status;
-}
-
-/**
- * GPIO pin configuration structure
- */
-struct GpioConfig {
-    Platform::GPIO::Port port;            // GPIO port (A, B, C, etc.)
-    uint8_t pin;                          // Pin number (0-15)
-    Platform::GPIO::Mode mode;            // Pin mode (Input, Output, Alternate, Analog)
-    Platform::GPIO::OutputType outputType; // Output type (Push-Pull, Open-Drain)
-    Platform::GPIO::Pull pull;            // Pull-up/Pull-down configuration
-    Platform::GPIO::Speed speed;          // GPIO speed
-    Platform::GPIO::AlternateFunction af; // Alternate function (if mode is AlternateFunction)
-};
-
-/**
- * GPIO pin state enumeration
- */
-enum class GpioPinState {
-    Low = 0,
-    High = 1
-};
+#include "common/platform_gpio.hpp"
 
 /**
  * GPIO hardware interface implementation
  * Provides a C++ object-oriented interface to GPIO peripherals
  */
+
+
 class GpioInterface : public HwInterface {
 private:
     // Internal state tracking
     bool initialized;
     
     // Helper methods
-    Platform::Status ConfigPin(const GpioConfig& config);
+    Platform::Status ConfigPin(const Platform::GPIO::GpioConfig& config);
     Platform::GPIO::Registers* GetPortAddress(Platform::GPIO::Port port);
     
 public:
@@ -63,8 +40,8 @@ public:
     Platform::Status SetPin(Platform::GPIO::Port port, uint8_t pin);
     Platform::Status ResetPin(Platform::GPIO::Port port, uint8_t pin);
     Platform::Status TogglePin(Platform::GPIO::Port port, uint8_t pin);
-    Platform::Status ReadPin(Platform::GPIO::Port port, uint8_t pin, GpioPinState& state);
-    Platform::Status ConfigurePin(const GpioConfig& config);
+    Platform::Status ReadPin(Platform::GPIO::Port port, uint8_t pin, Platform::GPIO::GpioPinState& state);
+    Platform::Status ConfigurePin(const Platform::GPIO::GpioConfig& config);
     
     // Singleton pattern for GPIO interface (only need one instance)
     static GpioInterface& GetInstance();

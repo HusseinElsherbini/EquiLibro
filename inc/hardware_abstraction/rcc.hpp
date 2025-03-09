@@ -1,9 +1,8 @@
-﻿// rcc.hpp
-#ifndef RCC_HPP
-#define RCC_HPP
+﻿#pragma once
 
 #include "hw_interface.hpp"
 #include "common/platform.hpp"
+#include "common/platform_rcc.hpp"
 
 /**
  * Clock source type enumeration
@@ -112,4 +111,3 @@ constexpr uint32_t RCC_CTRL_SET_CLOCK_FREQUENCY = 0x0404;
 constexpr uint32_t RCC_CTRL_ENTER_LOW_POWER = 0x0405;
 constexpr uint32_t RCC_CTRL_EXIT_LOW_POWER = 0x0406;
 
-#endif /* RCC_HPP */

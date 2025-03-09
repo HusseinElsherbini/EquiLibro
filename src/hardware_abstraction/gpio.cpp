@@ -28,7 +28,7 @@ Platform::GPIO::Registers* GpioInterface::GetPortAddress(Platform::GPIO::Port po
 }
 
 // Configure a GPIO pin
-Platform::Status GpioInterface::ConfigPin(const GpioConfig& config) {
+Platform::Status GpioInterface::ConfigPin(const Platform::GPIO::GpioConfig& config) {
 
     using Platform::GPIO::Registers;
     using Platform::GPIO::getPort;
@@ -150,30 +150,30 @@ Platform::Status GpioInterface::Control(uint32_t command, void* param) {
     // Process the command
     switch (command) {
         case GPIO_CTRL_CONFIG_PIN: {
-            GpioConfig* pin_config = static_cast<GpioConfig*>(param);
+            Platform::GPIO::GpioConfig* pin_config = static_cast<Platform::GPIO::GpioConfig*>(param);
             return ConfigPin(*pin_config);
         }
             
         case GPIO_CTRL_SET_PIN: {
-            GpioConfig* pin_config = static_cast<GpioConfig*>(param);
+            Platform::GPIO::GpioConfig* pin_config = static_cast<Platform::GPIO::GpioConfig*>(param);
             return SetPin(pin_config->port, pin_config->pin);
         }
             
         case GPIO_CTRL_RESET_PIN: {
-            GpioConfig* pin_config = static_cast<GpioConfig*>(param);
+            Platform::GPIO::GpioConfig* pin_config = static_cast<Platform::GPIO::GpioConfig*>(param);
             return ResetPin(pin_config->port, pin_config->pin);
         }
             
         case GPIO_CTRL_TOGGLE_PIN: {
-            GpioConfig* pin_config = static_cast<GpioConfig*>(param);
+            Platform::GPIO::GpioConfig* pin_config = static_cast<Platform::GPIO::GpioConfig*>(param);
             return TogglePin(pin_config->port, pin_config->pin);
         }
             
         case GPIO_CTRL_READ_PIN: {
             // Param is both input (config) and output (state)
-            GpioConfig* pin_config = static_cast<GpioConfig*>(param);
-            GpioPinState* state = reinterpret_cast<GpioPinState*>(
-                reinterpret_cast<char*>(param) + sizeof(GpioConfig)
+            Platform::GPIO::GpioConfig* pin_config = static_cast<Platform::GPIO::GpioConfig*>(param);
+            Platform::GPIO::GpioPinState* state = reinterpret_cast<Platform::GPIO::GpioPinState*>(
+                reinterpret_cast<char*>(param) + sizeof(Platform::GPIO::GpioConfig)
             );
             return ReadPin(pin_config->port, pin_config->pin, *state);
         }
@@ -241,18 +241,18 @@ Platform::Status GpioInterface::TogglePin(Platform::GPIO::Port port, uint8_t pin
     return Platform::Status::OK;
 }
 
-Platform::Status GpioInterface::ReadPin(Platform::GPIO::Port port, uint8_t pin, GpioPinState& state) {
+Platform::Status GpioInterface::ReadPin(Platform::GPIO::Port port, uint8_t pin, Platform::GPIO::GpioPinState& state) {
     Platform::GPIO::Registers* gpio_port = GetPortAddress(port);
     if (gpio_port == nullptr) {
         return Platform::Status::INVALID_PARAM;
     }
     
     // Read the pin state from the IDR register
-    state = (gpio_port->IDR & (1UL << pin)) ? GpioPinState::High : GpioPinState::Low;
+    state = (gpio_port->IDR & (1UL << pin)) ? Platform::GPIO::GpioPinState::High : Platform::GPIO::GpioPinState::Low;
     
     return Platform::Status::OK;
 }
 
-Platform::Status GpioInterface::ConfigurePin(const GpioConfig& config) {
+Platform::Status GpioInterface::ConfigurePin(const Platform::GPIO::GpioConfig& config) {
     return ConfigPin(config);
 }
