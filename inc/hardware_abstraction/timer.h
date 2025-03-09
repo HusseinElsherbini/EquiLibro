@@ -1,7 +1,7 @@
 ﻿#ifndef TIMER_H
 #define TIMER_H
 
-#include "hw_interface.h"
+#include "hw_interface.hpp"
 
 // Maximum number of timer instances
 #define MAX_TIMER_INSTANCES 5
