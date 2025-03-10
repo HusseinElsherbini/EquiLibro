@@ -5,7 +5,7 @@
 #include "common/platform.hpp"
 #include "middleware/middleware_module.hpp"
 #include "hardware_abstraction/flash.hpp"
-
+#include "hardware_abstraction/pwr.hpp"
 namespace Middleware {
 namespace SystemServices {
 
@@ -29,6 +29,7 @@ struct SystemInitConfig {
 
     Platform::RCC::RccConfig SysClockConfig;
     Platform::FLASH::FlashConfig FlashConfig;
+    Platform::PWR::PowerConfig PowerConfig;
 
     // Bus dividers
     uint8_t ahbDivider;             // AHB bus clock divider (1, 2, 4, 8, 16, 64, 128, 256, 512)

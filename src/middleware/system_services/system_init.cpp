@@ -42,6 +42,9 @@ SystemInitConfig SystemInit::GetDefaultConfig() {
 
     config.FlashConfig.latency = Platform::FLASH::FlashLatency::WS4;
 
+    config.PowerConfig.voltage_scale = Platform::PWR::VoltageScale::Scale1;
+    
+
     config.SysClockConfig.initialPowerMode = Platform::RCC::PowerMode::Run;
     config.SysClockConfig.enableSysTick = true;
     config.SysClockConfig.sysTickInterval = 1000;  // 1ms SysTick interval
