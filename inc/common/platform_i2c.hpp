@@ -41,19 +41,6 @@ namespace Platform {
             Slave
         };
 
-        // I2C transfer state
-        enum class TransferState {
-            Idle,
-            StartSent,
-            RepeatedStartSent,
-            AddrSentW,
-            AddrSentR,
-            RegAddrSent,
-            Writing,
-            Reading,
-            Error
-        };
-
         // I2C operation type
         enum class Operation {
             None,

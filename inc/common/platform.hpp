@@ -78,7 +78,7 @@ constexpr uint32_t FPB_BASE = (SCS_BASE + 0x0300UL);         // Flash Patch and 
 // Generic bit manipulation templates
 template<typename RegType, typename BitType>
 inline void clearBit(volatile RegType& reg, BitType bit) {
-    reg |= static_cast<RegType>(bit);
+    reg &= ~static_cast<RegType>(bit);
 }
 
 template<typename RegType, typename BitType>

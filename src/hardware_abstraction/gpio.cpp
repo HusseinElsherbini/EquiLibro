@@ -18,6 +18,8 @@ GpioInterface::~GpioInterface() {
 
 // Singleton instance getter
 GpioInterface& GpioInterface::GetInstance() {
+
+    // Static instance of the interface, created on first use
     static GpioInterface instance;
     return instance;
 }
