@@ -1,6 +1,11 @@
 ﻿// rcc.cpp
 #include "hardware_abstraction/rcc.hpp"
 #include "common/platform.hpp"
+#include "common/platform_rcc.hpp"
+#include "common/platform_flash.hpp"
+
+namespace Platform {
+namespace RCC {
 
 // Constructor
 RccInterface::RccInterface() 
@@ -412,7 +417,7 @@ Platform::Status RccInterface::CalculatePllSettings(RccConfig& config) {
 // Implement the ConfigureFlashLatency method
 Platform::Status RccInterface::ConfigureFlashLatency(uint32_t systemClockHz) {
 
-    using namespace Platform::FLASH;
+    using namespace Platform:: FLASH;
 
     // Determine proper flash latency based on system clock frequency
     uint8_t flashLatency;
@@ -751,4 +756,4 @@ Platform::Status RccInterface::DisablePeripheralClock(Platform::RCC::RccPeripher
     
     return Platform::Status::OK;
 }
-            
+}

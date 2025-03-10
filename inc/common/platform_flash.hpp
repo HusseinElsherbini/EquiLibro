@@ -9,6 +9,14 @@ namespace Platform {
         constexpr uint32_t FLASH_ACR_OFFSET = 0x00UL;
         constexpr uint32_t FLASH_ACR = (FLASH_BASE + FLASH_ACR_OFFSET);
         
+        constexpr uint32_t FLASH_BASE_ADDRESS = 0x08000000;
+        constexpr uint32_t FLASH_END_ADDRESS = 0x08080000;
+        constexpr uint8_t  FLASH_SECTOR_COUNT = 8;
+        constexpr uint8_t  INVALID_SECTOR = 0xFF;
+
+        constexpr uint32_t FLASH_KEY1 = 0x45670123UL;
+        constexpr uint32_t FLASH_KEY2 = 0xCDEF89ABUL;
+
         // Flash access control register (ACR) bits
         enum class ACR : uint32_t {
             LATENCY_0WS = (0UL << 0),   // Zero wait states

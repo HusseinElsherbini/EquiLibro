@@ -4,6 +4,10 @@
 #include "common/platform.hpp"
 #include "common/platform_rcc.hpp"
 
+
+namespace Platform {
+namespace RCC {
+
 /**
  * Clock source type enumeration
  */
@@ -111,3 +115,5 @@ constexpr uint32_t RCC_CTRL_SET_CLOCK_FREQUENCY = 0x0404;
 constexpr uint32_t RCC_CTRL_ENTER_LOW_POWER = 0x0405;
 constexpr uint32_t RCC_CTRL_EXIT_LOW_POWER = 0x0406;
 
+}// namespace RCC       
+}// namespace Platform

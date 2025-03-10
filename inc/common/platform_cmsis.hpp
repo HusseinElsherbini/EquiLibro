@@ -355,6 +355,51 @@ namespace Platform {
                 return reinterpret_cast<Registers*>(FPB_BASE);
             }
         }
+    
+        // MPU name space
+        namespace MPU {
+            // Memory Protection Unit register structure
+            struct Registers {
+                volatile uint32_t TYPE;         // MPU Type Register
+                volatile uint32_t CTRL;         // MPU Control Register
+                volatile uint32_t RNR;          // MPU Region Number Register
+                volatile uint32_t RBAR;         // MPU Region Base Address Register
+                volatile uint32_t RASR;         // MPU Region Attribute and Size Register
+                volatile uint32_t RBAR_A1;      // Alias 1 Region Base Address Register
+                volatile uint32_t RASR_A1;      // Alias 1 Region Attribute and Size Register
+                volatile uint32_t RBAR_A2;      // Alias 2 Region Base Address Register
+                volatile uint32_t RASR_A2;      // Alias 2 Region Attribute and Size Register
+                volatile uint32_t RBAR_A3;      // Alias 3 Region Base Address Register
+                volatile uint32_t RASR_A3;      // Alias 3 Region Attribute and Size Register
+            };
+
+            // MPU Control Register bits
+            constexpr uint32_t CTRL_ENABLE = (1UL << 0);
+            constexpr uint32_t CTRL_HFNMIENA = (1UL << 1);
+            constexpr uint32_t CTRL_PRIVDEFENA = (1UL << 2);
+
+            // Access function for MPU registers
+            inline Registers* getRegisters() {
+                return reinterpret_cast<Registers*>(MPU_BASE);
+            }
+        }
+
+        // FPU name space
+        namespace FPU {
+            // Floating Point Unit register structure
+            struct Registers {
+                volatile uint32_t CPACR;        // Coprocessor Access Control Register
+            };
+
+            // FPU register bit definitions
+            constexpr uint32_t CPACR_CP10 = (3UL << 20);
+            constexpr uint32_t CPACR_CP11 = (3UL << 22);
+
+            // Access function for FPU registers
+            inline Registers* getRegisters() {
+                return reinterpret_cast<Registers*>(FPU_BASE);
+            }
+        }
     }
 
 }
