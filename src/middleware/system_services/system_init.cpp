@@ -179,12 +179,6 @@ Platform::Status SystemInitImpl::Init(void* config) {
     system_state.reset_cause = static_cast<uint32_t>(DetermineResetCause());
     ClearResetFlags();
 
-    // Get hardware interfaces
-    rcc_interface = std::make_shared<Platform::RCC::RccInterface>();
-    if (!rcc_interface) {
-        return Platform::Status::ERROR;
-    }
-    
     // Configure the system clock
     Platform::Status status = ConfigureSystemClock();
     if (status != Platform::Status::OK) {
@@ -705,7 +699,10 @@ Platform::Status SystemInitImpl::ConfigureSystemClock() {
 
     // Configure the system clock based on the provided configuration
     // Initialize RCC with the configuration
-
+    if (!rcc_interface) {
+        // Handle the error case - maybe try to initialize rcc_interface or return an error
+        return Platform::Status::ERROR;
+    }
 
     Platform::Status status = rcc_interface->Control(Platform::RCC::RCC_CTRL_CONFIGURE_SYSTEM_CLOCK, &config.SysClockConfig);
     if (status != Platform::Status::OK) {
@@ -755,6 +752,10 @@ Platform::Status SystemInitImpl::ConfigureSystemClock() {
 }
 // Configure flash latency based on system clock frequency
 Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_freq, Platform::FLASH::FlashLatency latency) {
+
+    if (!flash_interface) {
+        return Platform::Status::ERROR;
+    }
     // Calculate appropriate latency based on system clock if auto mode is selected
     uint8_t flash_wait_states;
     
@@ -774,63 +775,32 @@ Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_fre
             flash_wait_states = 3; // For up to 84 MHz
         }
     } else {
-        // Use the specified latency
-        switch (latency) {
-            case Platform::FLASH::FlashLatency::WS0:
-                flash_wait_states = 0;
-                break;
-            case Platform::FLASH::FlashLatency::WS1:
-                flash_wait_states = 1;
-                break;
-            case Platform::FLASH::FlashLatency::WS2:
-                flash_wait_states = 2;
-                break;
-            case Platform::FLASH::FlashLatency::WS3:
-                flash_wait_states = 3;
-                break;
-            case Platform::FLASH::FlashLatency::WS4:
-                flash_wait_states = 4;
-                break;
-            case Platform::FLASH::FlashLatency::WS5:
-                flash_wait_states = 5;
-                break;
-            default:
-                return Platform::Status::INVALID_PARAM;
-        }
+        // Use the provided latency value
+        flash_wait_states = static_cast<uint8_t>(latency);
     }
     
-    // Access flash control register
-    volatile Platform::FLASH::Registers* flash_regs = Platform::FLASH::getRegisters();
-    
-    // Configure flash latency
-    uint32_t reg_value = flash_regs->ACR;
 
-     
-    reg_value &= ~static_cast<uint32_t>(Platform::FLASH::ACR::LATENCY_MSK);  // Clear latency bits (first 4 bits)
-    reg_value |= flash_wait_states;  // Set new latency
-    
-    // Configure flash features based on configuration
-    if (config.FlashConfig.prefetch_enable) {
-        reg_value |= Platform::FLASH::getBitValue(Platform::FLASH::ACR::PRFTEN); // PRFTEN bit
-    } else {
-        reg_value &= ~Platform::FLASH::getBitValue(Platform::FLASH::ACR::PRFTEN);
+    Platform::FLASH::FlashConfig flash_config = {
+        .latency = static_cast<Platform::FLASH::FlashLatency>(flash_wait_states),
+        .prefetch_enable = config.FlashConfig.prefetch_enable,
+        .icache_enable = config.FlashConfig.icache_enable,
+        .dcache_enable = config.FlashConfig.dcache_enable,
+    };
+
+    // Configure flash latency
+    Platform::Status status = flash_interface->Control(Platform::FLASH::FLASH_CTRL_CONFIGURE, nullptr);
+
+    if (status != Platform::Status::OK) {
+        return status;
     }
-    
-    if (config.FlashConfig.icache_enable) {
-        reg_value |= Platform::FLASH::getBitValue(Platform::FLASH::ACR::ICEN); // ICEN bit
-    } else {
-        reg_value &= ~Platform::FLASH::getBitValue(Platform::FLASH::ACR::ICEN);
+
+    // Access flash registers to verify the latency setting
+    volatile Platform::FLASH::Registers* flash_regs = Platform::FLASH::getRegisters();
+
+    if(!flash_regs) {
+        return Platform::Status::ERROR;
     }
-    
-    if (config.FlashConfig.dcache_enable) {
-        reg_value |= Platform::FLASH::getBitValue(Platform::FLASH::ACR::DCEN); // DCEN bit
-    } else {
-        reg_value &= ~Platform::FLASH::getBitValue(Platform::FLASH::ACR::DCEN);
-    }
-    
-    // Write the new value
-    flash_regs->ACR = reg_value;
-    
+
     // Verify that the latency was set correctly
     if ((flash_regs->ACR & static_cast<uint32_t>(Platform::FLASH::ACR::LATENCY_MSK)) != flash_wait_states) {
         return Platform::Status::ERROR;
@@ -847,6 +817,10 @@ Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_fre
 
 // Configure SysTick timer
 Platform::Status SystemInitImpl::ConfigureSysTick(uint32_t interval_us) {
+
+    if (!systick_interface) {
+        return Platform::Status::ERROR;
+    }
     // Get SysTick interface
     systick_interface = Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
     
@@ -867,7 +841,7 @@ Platform::Status SystemInitImpl::ConfigureSysTick(uint32_t interval_us) {
     }
     
     // Configure SysTick
-    SysTickConfig systick_config = {
+    Platform::CMSIS::SysTick::SysTickConfig systick_config = {
         .reload_value = reload_value,
         .enable_interrupt = true,
         .use_processor_clock = true
@@ -880,7 +854,7 @@ Platform::Status SystemInitImpl::ConfigureSysTick(uint32_t interval_us) {
     }
     
     // Start SysTick
-    status = systick_interface->Control(SYSTICK_CTRL_START, nullptr);
+    status = systick_interface->Control(Platform::CMSIS::SysTick::SYSTICK_CTRL_START, nullptr);
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -932,17 +906,17 @@ Platform::Status SystemInitImpl::ConfigureFPU() {
     // We should ideally have an FPU interface, but if not available,
     // we can create a system register interface function that's more consistent
     
-    uint32_t cpacr_addr = Platform::CMSIS getRegisters; // CPACR register address
+    auto fpu_regs = Platform::CMSIS::FPU::getRegisters(); // CPACR register address
     uint32_t cpacr_value = 0;
     
     // Read current value
-    ReadSystemRegister(cpacr_addr, cpacr_value);
+    ReadSystemRegister(reinterpret_cast<uintptr_t>(&(fpu_regs->CPACR)), cpacr_value);
     
     // Enable CP10 and CP11 (FPU) access for privileged and user mode
     cpacr_value |= ((3UL << 10 * 2) | (3UL << 11 * 2));
     
     // Write updated value
-    WriteSystemRegister(cpacr_addr, cpacr_value);
+    WriteSystemRegister(reinterpret_cast<uintptr_t>(&(fpu_regs->CPACR)), cpacr_value);
     
     // Make sure changes are applied
     __asm volatile("DSB");
@@ -957,43 +931,30 @@ Platform::Status SystemInitImpl::ConfigureFPU() {
 // Configure cache settings
 Platform::Status SystemInitImpl::ConfigureCache() {
     // Set cache configuration based on settings
-    volatile uint32_t* flash_acr = reinterpret_cast<volatile uint32_t*>(0x40023C00);
-    uint32_t reg_value = *flash_acr;
-    
-    // Configure prefetch
-    if (config.enablePrefetch) {
-        reg_value |= (1 << 8); // PRFTEN bit
-    } else {
-        reg_value &= ~(1 << 8);
+
+    if(!flash_interface) {
+        return Platform::Status::ERROR;
     }
     
-    // Configure instruction cache
-    if (config.enableICache) {
-        // Reset instruction cache before enabling
-        *flash_acr = reg_value | (1 << 11); // Set ICRST bit to reset I-cache
-        reg_value &= ~(1 << 11); // Clear ICRST bit
-        reg_value |= (1 << 9); // Set ICEN bit to enable I-cache
-    } else {
-        reg_value &= ~(1 << 9);
+    Platform::FLASH::FlashConfig flash_config = {
+        .latency = static_cast<Platform::FLASH::FlashLatency>(system_state.flash_latency),
+        .prefetch_enable = config.FlashConfig.prefetch_enable,
+        .icache_enable = config.FlashConfig.icache_enable,
+        .dcache_enable = config.FlashConfig.dcache_enable,
+    };
+
+    // Configure flash latency
+    Platform::Status status = flash_interface->Control(Platform::FLASH::FLASH_CTRL_CONFIGURE, &flash_config);
+
+    if (status != Platform::Status::OK) {
+        return status;
     }
-    
-    // Configure data cache
-    if (config.enableDCache) {
-        // Reset data cache before enabling
-        *flash_acr = reg_value | (1 << 12); // Set DCRST bit to reset D-cache
-        reg_value &= ~(1 << 12); // Clear DCRST bit
-        reg_value |= (1 << 10); // Set DCEN bit to enable D-cache
-    } else {
-        reg_value &= ~(1 << 10);
-    }
-    
-    // Write the configuration
-    *flash_acr = reg_value;
-    
+
     // Update system state
-    system_state.prefetch_enabled = config.enablePrefetch;
-    system_state.icache_enabled = config.enableICache;
-    system_state.dcache_enabled = config.enableDCache;
+    system_state.flash_latency = static_cast<uint32_t>(flash_config.latency);
+    system_state.prefetch_enabled = flash_config.prefetch_enable;
+    system_state.icache_enabled = flash_config.icache_enable;
+    system_state.dcache_enabled = flash_config.dcache_enable;
     
     return Platform::Status::OK;
 }
@@ -1009,7 +970,7 @@ ResetCause SystemInitImpl::DetermineResetCause() {
     
     // Use RCC interface to read reset flags
     uint32_t reset_flags = 0;
-    Platform::Status status = rcc_interface->Control(RCC_CTRL_GET_RESET_FLAGS, &reset_flags);
+    Platform::Status status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_RESET_FLAGS, &reset_flags);
     
     if (status != Platform::Status::OK) {
         // Handle error in reading flags
@@ -1017,19 +978,19 @@ ResetCause SystemInitImpl::DetermineResetCause() {
     }
     
     // Check reset flags in order of priority
-    if (reset_flags & RCC_RESET_FLAG_LPWR) {  // Low-power reset flag
+    if (reset_flags & Platform::RCC::RccResetFlags::RCC_RESET_FLAG_LPWRRST) {  // Low-power reset flag
         return ResetCause::LowPower;
-    } else if (reset_flags & RCC_RESET_FLAG_WWDG) {  // Window watchdog reset flag
+    } else if (reset_flags &  Platform::RCC::RccResetFlags::RCC_RESET_FLAG_WWDGRST) {  // Window watchdog reset flag
         return ResetCause::Watchdog;
-    } else if (reset_flags & RCC_RESET_FLAG_IWDG) {  // Independent watchdog reset flag
+    } else if (reset_flags & Platform::RCC::RccResetFlags::RCC_RESET_FLAG_IWDGRST) {  // Independent watchdog reset flag
         return ResetCause::Watchdog;
-    } else if (reset_flags & RCC_RESET_FLAG_SFT) {  // Software reset flag
+    } else if (reset_flags & Platform::RCC::RccResetFlags::RCC_RESET_FLAG_SFTRST) {  // Software reset flag
         return ResetCause::Software;
-    } else if (reset_flags & RCC_RESET_FLAG_POR) {  // POR/PDR reset flag
+    } else if (reset_flags & Platform::RCC::RccResetFlags::RCC_RESET_FLAG_PORRST) {  // POR/PDR reset flag
         return ResetCause::PowerOn;
-    } else if (reset_flags & RCC_RESET_FLAG_PIN) {  // PIN reset flag
+    } else if (reset_flags & Platform::RCC::RccResetFlags::RCC_RESET_FLAG_PINRST) {  // PIN reset flag
         return ResetCause::External;
-    } else if (reset_flags & RCC_RESET_FLAG_BOR) {  // BOR reset flag
+    } else if (reset_flags & Platform::RCC::RccResetFlags::RCC_RESET_FLAG_BORRST) {  // BOR reset flag
         return ResetCause::BrownOut;
     } else {
         return ResetCause::Unknown;
@@ -1040,7 +1001,7 @@ ResetCause SystemInitImpl::DetermineResetCause() {
 void SystemInitImpl::ClearResetFlags() {
     // Use RCC interface to clear reset flags
     if (rcc_interface) {
-        rcc_interface->Control(RCC_CTRL_CLEAR_RESET_FLAGS, nullptr);
+        rcc_interface->Control(Platform::RCC::RCC_CTRL_CLEAR_RESET_FLAGS, nullptr);
     }
 }
 

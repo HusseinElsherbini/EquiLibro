@@ -29,6 +29,15 @@ struct RccPllConfig {
     RccClockSource source;     // PLL source (HSI or HSE)
 };
 
+enum RccResetFlags : uint32_t {
+    RCC_RESET_FLAG_WWDGRST = 0x80000000,
+    RCC_RESET_FLAG_IWDGRST = 0x40000000,
+    RCC_RESET_FLAG_SFTRST = 0x20000000,
+    RCC_RESET_FLAG_PORRST = 0x10000000,
+    RCC_RESET_FLAG_PINRST = 0x08000000,
+    RCC_RESET_FLAG_BORRST = 0x04000000,
+    RCC_RESET_FLAG_LPWRRST = 0x02000000
+};
 /**
  * RCC configuration structure
  */
@@ -77,7 +86,10 @@ private:
     Platform::Status CalculatePllSettings(RccConfig& config);
     Platform::Status ConfigureFlashLatency(uint32_t systemClockHz);
     
-public:
+public:    
+
+    // Singleton pattern for RCC interface (only need one instance)
+    static std::shared_ptr<RccInterface> GetInstance();
     // Constructor
     RccInterface();
     
@@ -97,6 +109,7 @@ public:
     Platform::Status DisablePeripheralClock(Platform::RCC::RccPeripheral peripheral);
     Platform::Status ConfigureClockFrequency(uint32_t frequencyHz);
     Platform::Status IsPeripheralClockEnabled(Platform::RCC::RccPeripheral peripheral, bool& enabled) const;
+    Platform::Status ClearResetFlags(void);
 
     // Clock frequency getters
     uint32_t GetSystemClockFrequency() const;
@@ -109,8 +122,7 @@ public:
     // Default configuration creator
     static RccConfig CreateDefaultConfig();
     
-    // Singleton pattern for RCC interface (only need one instance)
-    static std::shared_ptr<RccInterface> RccInterface::GetInstance();
+
 };
 
 // RCC control command identifiers
@@ -124,6 +136,7 @@ constexpr uint32_t RCC_CTRL_GET_RESET_FLAGS = 0x0407;
 constexpr uint32_t RCC_CTRL_CONFIGURE_SYSTEM_CLOCK = 0x0408;
 constexpr uint32_t RCC_CTRL_GET_ALL_CLOCK_FREQUENCIES = 0x0409;
 constexpr uint32_t RCC_CTRL_GET_CLOCK_SOURCE = 0x040A;
+constexpr uint32_t RCC_CTRL_CLEAR_RESET_FLAGS = 0x040B;
 
 }// namespace RCC       
 }// namespace Platform

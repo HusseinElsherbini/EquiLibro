@@ -38,7 +38,7 @@ private:
     // Internal state tracking
     bool initialized;
     SysTickConfig config;
-    uint64_t tick_count;
+    std::atomic<uint64_t> tick_count;
     uint32_t tick_frequency;
     
     // Callback table
@@ -52,8 +52,8 @@ private:
     // Private constructor for singleton pattern
     SysTickInterface();
 
-    std::shared_ptr<SysTickInterface> SysTickInterface::systick_instance;
-    std::mutex SysTickInterface::instance_mutex;    
+    static std::shared_ptr<SysTickInterface> systick_instance;
+    static std::mutex instance_mutex;    
     // Deleted copy constructor and assignment operator
     SysTickInterface(const SysTickInterface&) = delete;
     SysTickInterface& operator=(const SysTickInterface&) = delete;
@@ -83,7 +83,7 @@ public:
     friend void SysTick_IRQHandler(void);
     
     // Singleton pattern for SysTick interface (only need one instance)
-    std::shared_ptr<SysTickInterface> GetInstance();
+    static std::shared_ptr<SysTickInterface> GetInstance();
 };
 
 // SysTick control command identifiers

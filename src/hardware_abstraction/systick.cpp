@@ -38,10 +38,11 @@ SysTickInterface::~SysTickInterface() {
 std::shared_ptr<SysTickInterface> SysTickInterface::GetInstance() {
 
     std::lock_guard<std::mutex> lock(instance_mutex);
+    
     if (!systick_instance) {
         systick_instance = std::shared_ptr<SysTickInterface>(new SysTickInterface());
     }
-    
+
     return systick_instance;
 }
 
@@ -254,7 +255,7 @@ uint32_t SysTickInterface::GetCurrentValue() const {
 
 // Get the number of SysTick ticks that have occurred since initialization
 uint64_t SysTickInterface::GetTickCount() const {
-    return tick_count;
+    return tick_count.load(std::memory_order_acquire);
 }
 
 // Convert milliseconds to SysTick ticks
@@ -265,25 +266,42 @@ uint32_t SysTickInterface::MillisecondsToTicks(uint32_t ms) const {
 // Calculate a timeout point in the future
 uint64_t SysTickInterface::CalculateTimeout(uint32_t ms) const {
     uint32_t ticks = MillisecondsToTicks(ms);
-    return tick_count + ticks;
+    return tick_count.load(std::memory_order_acquire) + ticks;
 }
 
 // Check if a timeout has occurred
 bool SysTickInterface::HasTimeoutOccurred(uint64_t timeout) const {
-    return tick_count >= timeout;
+    return tick_count.load(std::memory_order_acquire) >= timeout;
 }
 
 // SysTick interrupt handler
 // This should be called from the SysTick_Handler() in startup code
 extern "C" void SysTick_IRQHandler(void) {
-    // Increment tick count
-    systick_instance.tick_count++;
+    // Get the singleton instance safely
+    auto instance = systick_instance;
     
-    // Call tick callback if registered
-    auto& callback = systick_instance.callbacks[static_cast<uint32_t>(SysTickCallbackType::Tick)];
-    if (callback.callback != nullptr) {
-        callback.callback(callback.param);
+    // Check if the instance exists and is valid before using it
+    if (instance) {
+        // Increment tick count - access through the shared_ptr
+        instance->tick_count.fetch_add(1, std::memory_order_relaxed); // atomic increment
+        
+        // Check if callbacks array is initialized and the specific callback exists
+        if (static_cast<uint32_t>(SysTickCallbackType::Tick) < 
+            static_cast<uint32_t>(SysTickCallbackType::Max)) {
+            
+            // Get the callback entry safely
+            auto& callback = instance->callbacks[static_cast<uint32_t>(SysTickCallbackType::Tick)];
+            
+            // Call the callback if it's registered
+            if (callback.callback != nullptr) {
+                callback.callback(callback.param);
+            }
+        }
     }
+    // If instance doesn't exist, we simply return without doing anything
+    // This prevents issues during system initialization when the SysTick
+    // interrupt might trigger before the instance is fully set up
+}
 }
 } // namespace SysTick
 } // namespace CMSIS

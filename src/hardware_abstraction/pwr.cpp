@@ -50,8 +50,11 @@ Platform::Status PowerInterfaceImpl::Init(void* config) {
     }
     
     // Enable PWR clock in RCC
-    auto& rcc = Platform::RCC::RccInterface::GetInstance();
-    Platform::Status status = rcc.EnablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
+    std::shared_ptr<Platform::RCC::RccInterface> rcc = Platform::RCC::RccInterface::GetInstance();
+
+
+    Platform::Status status = rcc->EnablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
+
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -140,8 +143,8 @@ Platform::Status PowerInterfaceImpl::DeInit() {
     }
     
     // Reset PWR peripheral
-    auto& rcc = Platform::RCC::RccInterface::GetInstance();
-    Platform::Status status = rcc.DisablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
+    auto rcc = Platform::RCC::RccInterface::GetInstance();
+    Platform::Status status = rcc->DisablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
     
     initialized = false;
     return status;

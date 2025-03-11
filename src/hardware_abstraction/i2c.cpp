@@ -148,7 +148,7 @@ Platform::Status I2CInterface::CalculateTimingParameters() {
     }
     
     // Get RCC interface to determine peripheral clock frequency
-    auto& rcc = RccInterface::GetInstance();
+    auto rcc = RccInterface::GetInstance();
     
     // Determine peripheral clock frequency
     uint32_t pclk1_freq = rcc.GetApb1ClockFrequency();

@@ -470,6 +470,14 @@ Platform::Status RccInterface::ConfigureFlashLatency(uint32_t systemClockHz) {
     return Platform::Status::OK;
 }
 
+Platform::Status RccInterface::ClearResetFlags(void) {
+    Platform::RCC::Registers* rcc = Platform::RCC::getRegisters();
+    
+    // Clear all flags
+    rcc->CSR = 0x0F; // Clear all reset flags
+    
+    return Platform::Status::OK;
+}
 
 Platform::Status RccInterface::DeInit() {
     // Reset all clock configuration back to reset state
@@ -598,7 +606,9 @@ Platform::Status RccInterface::Control(uint32_t command, void* param) {
             uint32_t frequency = *static_cast<uint32_t*>(param);
             return ConfigureClockFrequency(frequency);
         }
-        
+        case RCC_CTRL_CLEAR_RESET_FLAGS: {
+            return ClearResetFlags();
+        }
         case RCC_CTRL_CONFIGURE_SYSTEM_CLOCK: {
             RccConfig* config = static_cast<RccConfig*>(param);
             return ConfigureSystemClock(*config);

@@ -24,7 +24,7 @@ Platform::Status FlashInterfaceImpl::Init(void* config) {
     
     // Use default configuration if none provided
     if (config == nullptr) {
-        this->config.latency = 0;
+        this->config.latency = FlashLatency::WS0;
         this->config.prefetch_enable = true;
         this->config.icache_enable = true;
         this->config.dcache_enable = true;
@@ -254,7 +254,7 @@ Platform::Status FlashInterfaceImpl::Configure(const FlashConfig& config) {
     reg_value &= ~static_cast<uint32_t>(Platform::FLASH::ACR::LATENCY_MSK);
     
     // Set new latency
-    reg_value |= (config.latency & 0x07); // 3 bits of latency (0-7)
+    reg_value |= (static_cast<uint32_t>(config.latency) & 0x07); // 3 bits of latency (0-7)
     
     // Configure prefetch
     if (config.prefetch_enable) {
@@ -281,7 +281,7 @@ Platform::Status FlashInterfaceImpl::Configure(const FlashConfig& config) {
     flash_regs->ACR = reg_value;
     
     // Verify the configuration was applied
-    if ((flash_regs->ACR & 0x07) != config.latency) {
+    if ((flash_regs->ACR & 0x07) != static_cast<uint32_t>(config.latency)) {
         return Platform::Status::ERROR;
     }
     

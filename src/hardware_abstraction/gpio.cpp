@@ -2,6 +2,8 @@
 #include "hardware_abstraction/gpio.hpp"
 #include "hardware_abstraction/rcc.hpp"
 #include "common/platform.hpp"
+#include <memory>
+#include <mutex>
 
 // Constructor
 GpioInterface::GpioInterface() : initialized(false) {
@@ -43,8 +45,11 @@ Platform::Status GpioInterface::ConfigPin(const Platform::GPIO::GpioConfig& conf
     }
 
     // Enable clock to GPIO port using RCC interface
-    RccInterface& rcc = RccInterface::GetInstance();
-    
+    std::shared_ptr<Platform::RCC::RccInterface> rcc = Platform::RCC::RccInterface::GetInstance();
+
+    if (rcc == nullptr) {
+        return Platform::Status::ERROR;
+    }    
     // Map GPIO port to RCC peripheral
     RccPeripheral rccPeripheral;
     switch (config.port) {
@@ -71,7 +76,7 @@ Platform::Status GpioInterface::ConfigPin(const Platform::GPIO::GpioConfig& conf
     }
     
     // Enable the peripheral clock
-    Platform::Status status = rcc.EnablePeripheralClock(rccPeripheral);
+    Platform::Status status = rcc->EnablePeripheralClock(rccPeripheral);
     if (status != Platform::Status::OK) {
         return status;
     }
