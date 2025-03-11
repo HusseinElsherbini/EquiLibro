@@ -1,9 +1,17 @@
 ﻿// src/hardware_abstraction/systick.cpp
 
 #include "hardware_abstraction/systick.hpp"
+#include <memory>
+#include <mutex>
+#include "common/platform.hpp"
+namespace Platform {
+namespace CMSIS {
+namespace SysTick {
 
-// Static instance of the SysTick interface
-static SysTickInterface systick_instance;
+// Static instance for singleton pattern
+std::shared_ptr<SysTickInterface> systick_instance = nullptr;
+std::mutex instance_mutex;
+
 
 // Constructor
 SysTickInterface::SysTickInterface() 
@@ -27,12 +35,18 @@ SysTickInterface::~SysTickInterface() {
 }
 
 // Singleton pattern implementation
-SysTickInterface& SysTickInterface::GetInstance() {
+std::shared_ptr<SysTickInterface> SysTickInterface::GetInstance() {
+
+    std::lock_guard<std::mutex> lock(instance_mutex);
+    if (!systick_instance) {
+        systick_instance = std::shared_ptr<SysTickInterface>(new SysTickInterface());
+    }
+    
     return systick_instance;
 }
 
 // Initialize SysTick with specific configuration
-Platform::Status SysTickInterface::Init(void* config) {
+Status SysTickInterface::Init(void* config) {
     // Check if already initialized
     if (initialized) {
         return Platform::Status::OK; // Already initialized
@@ -271,3 +285,6 @@ extern "C" void SysTick_IRQHandler(void) {
         callback.callback(callback.param);
     }
 }
+} // namespace SysTick
+} // namespace CMSIS
+

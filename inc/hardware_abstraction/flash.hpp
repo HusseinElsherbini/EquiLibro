@@ -38,7 +38,8 @@ enum class FlashLatency {
     WS2 = 2,    // Two wait states
     WS3 = 3,    // Three wait states
     WS4 = 4,    // Four wait states
-    WS5 = 5     // Five wait states
+    WS5 = 5,    // Five wait states
+    AUTOCALCULATE = 0xFF // Special value for auto-calculate
 };
 
 /**

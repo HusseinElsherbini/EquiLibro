@@ -3,17 +3,18 @@
 #include "common/platform.hpp"
 #include "common/platform_rcc.hpp"
 #include "common/platform_flash.hpp"
-
+#include <memory>
+#include <mutex>
 namespace Platform {
 namespace RCC {
 
+    // Static instance
+static std::shared_ptr<RccInterface> rcc_instance = nullptr;
+static std::mutex instance_mutex;
 // Constructor
 RccInterface::RccInterface() 
     : initialized(false), 
-      systemClockHz(0), 
-      ahbClockHz(0), 
-      apb1ClockHz(0), 
-      apb2ClockHz(0),
+      clockFreqs(), 
       enabledPeripheralsAHB1(0),
       enabledPeripheralsAHB2(0),
       enabledPeripheralsAPB1(0),
@@ -28,9 +29,13 @@ RccInterface::~RccInterface() {
 }
 
 // Singleton instance getter
-RccInterface& RccInterface::GetInstance() {
-    static RccInterface instance;
-    return instance;
+std::shared_ptr<RccInterface> RccInterface::GetInstance() {
+
+    std::lock_guard<std::mutex> lock(instance_mutex);
+    if (!rcc_instance) {
+        rcc_instance = std::shared_ptr<RccInterface>(new RccInterface());
+    }
+    return rcc_instance;
 }
 
 // Create default RCC configuration for the MCU
@@ -62,7 +67,6 @@ RccConfig RccInterface::CreateDefaultConfig() {
 }
 
 // Implementation of interface methods
-
 Platform::Status RccInterface::Init(void* config) {
     // Check if already initialized
     if (initialized) {
@@ -98,19 +102,24 @@ Platform::Status RccInterface::ConfigureClockFrequency(uint32_t frequencyHz) {
 }
 
 uint32_t RccInterface::GetSystemClockFrequency() const {
-    return systemClockHz;
+    return clockFreqs.systemClock;
 }
 
 uint32_t RccInterface::GetAhbClockFrequency() const {
-    return ahbClockHz;
+    return clockFreqs.ahbClock;
 }
 
 uint32_t RccInterface::GetApb1ClockFrequency() const {
-    return apb1ClockHz;
+    return clockFreqs.apb1Clock;
 }
 
 uint32_t RccInterface::GetApb2ClockFrequency() const {
-    return apb2ClockHz;
+    return clockFreqs.apb2Clock;
+}
+
+uint32_t RccInterface::GetResetFlags() const {
+    Platform::RCC::Registers* rcc = Platform::RCC::getRegisters();
+    return rcc->CSR;
 }
 
 Platform::Status RccInterface::ConfigureSystemClock(const RccConfig& config) {
@@ -302,9 +311,9 @@ Platform::Status RccInterface::ConfigureSystemClock(const RccConfig& config) {
     
     // Update cached clock frequencies
     if (localConfig.clockSource == RccClockSource::HSI) {
-        systemClockHz = 16000000; // HSI is fixed at 16 MHz
+        clockFreqs.systemClock = 16000000; // HSI is fixed at 16 MHz
     } else if (localConfig.clockSource == RccClockSource::HSE) {
-        systemClockHz = localConfig.hseFrequencyHz;
+        clockFreqs.systemClock = localConfig.hseFrequencyHz;
     } else if (localConfig.clockSource == RccClockSource::PLL) {
         // Calculate actual system clock from PLL settings
         uint32_t vco_input;
@@ -315,19 +324,20 @@ Platform::Status RccInterface::ConfigureSystemClock(const RccConfig& config) {
         }
         
         uint32_t vco_output = vco_input * localConfig.pllConfig.n;
-        systemClockHz = vco_output / localConfig.pllConfig.p;
+        clockFreqs.systemClock = vco_output / localConfig.pllConfig.p;
     }
     
     // Update bus frequencies
-    ahbClockHz = systemClockHz / localConfig.ahbPrescaler;
-    apb1ClockHz = ahbClockHz / localConfig.apb1Prescaler;
-    apb2ClockHz = ahbClockHz / localConfig.apb2Prescaler;
+    clockFreqs.ahbClock = clockFreqs.systemClock / localConfig.ahbPrescaler;
+    clockFreqs.apb1Clock = clockFreqs.ahbClock / localConfig.apb1Prescaler;
+    clockFreqs.apb2Clock = clockFreqs.ahbClock / localConfig.apb2Prescaler;
     
     // Save the active configuration
     activeConfig = localConfig;
     
     return Platform::Status::OK;
 }
+
 Platform::Status RccInterface::CalculatePllSettings(RccConfig& config) {
     // Target frequency must be within valid range
     if (config.systemClockHz < 24000000 || config.systemClockHz > 84000000) {
@@ -413,7 +423,6 @@ Platform::Status RccInterface::CalculatePllSettings(RccConfig& config) {
     
     return Platform::Status::OK;
 }
-
 // Implement the ConfigureFlashLatency method
 Platform::Status RccInterface::ConfigureFlashLatency(uint32_t systemClockHz) {
 
@@ -520,10 +529,10 @@ Platform::Status RccInterface::DeInit() {
     Platform::clearBit(rcc->CR, Platform::RCC::getBitValue(Platform::RCC::CR::HSEON));
     
     // Update cached frequencies
-    systemClockHz = 16000000;  // HSI frequency
-    ahbClockHz = systemClockHz;
-    apb1ClockHz = systemClockHz;
-    apb2ClockHz = systemClockHz;
+    clockFreqs.systemClock = 16000000;  // HSI frequency
+    clockFreqs.ahbClock = 16000000;
+    clockFreqs.apb1Clock = 16000000;
+    clockFreqs.apb2Clock = 16000000;
     
     initialized = false;
     return Platform::Status::OK;
@@ -558,21 +567,26 @@ Platform::Status RccInterface::Control(uint32_t command, void* param) {
             }* freq_info = static_cast<decltype(freq_info)>(param);
             
             // Determine which bus the peripheral is on and return appropriate frequency
-            uint32_t periph_val = static_cast<uint32_t>(freq_info->peripheral);
-            RccBusType bus = static_cast<RccBusType>((periph_val >> 8) & 0xFF);
+
+            auto it = peripheralMap.find(freq_info->peripheral);
+            if (it == peripheralMap.end()) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            RccBusType bus = it->second.bus;
+            uint8_t bitPos = it->second.bitPosition;
             
             switch (bus) {
                 case RccBusType::AHB1 :  // AHB1
-                    freq_info->frequency = ahbClockHz;
+                    freq_info->frequency = clockFreqs.ahbClock;
                     break;
                 case RccBusType::AHB2:  // AHB2
-                    freq_info->frequency = ahbClockHz;
+                    freq_info->frequency = clockFreqs.ahbClock;
                     break;
                 case RccBusType::APB1:  // APB1
-                    freq_info->frequency = apb1ClockHz;
+                    freq_info->frequency = clockFreqs.apb1Clock;
                     break;
                 case RccBusType::APB2:  // APB2
-                    freq_info->frequency = apb2ClockHz;
+                    freq_info->frequency = clockFreqs.apb2Clock;
                     break;
                 default:
                     return Platform::Status::INVALID_PARAM;
@@ -585,6 +599,28 @@ Platform::Status RccInterface::Control(uint32_t command, void* param) {
             return ConfigureClockFrequency(frequency);
         }
         
+        case RCC_CTRL_CONFIGURE_SYSTEM_CLOCK: {
+            RccConfig* config = static_cast<RccConfig*>(param);
+            return ConfigureSystemClock(*config);
+        }
+        case RCC_CTRL_GET_RESET_FLAGS: {
+            uint32_t* flags = static_cast<uint32_t*>(param);
+            *flags = GetResetFlags();
+            return Platform::Status::OK;
+        }
+        case RCC_CTRL_GET_ALL_CLOCK_FREQUENCIES: {
+            SysCLockFreqs* freqs = static_cast<SysCLockFreqs*>(param);
+            freqs->systemClock = GetSystemClockFrequency();
+            freqs->ahbClock = GetAhbClockFrequency();
+            freqs->apb1Clock = GetApb1ClockFrequency();
+            freqs->apb2Clock = GetApb2ClockFrequency();
+            return Platform::Status::OK;
+        }
+        case RCC_CTRL_GET_CLOCK_SOURCE: {
+            RccClockSource* source = static_cast<RccClockSource*>(param);
+            *source = activeConfig.clockSource;
+            return Platform::Status::OK;
+        }
         case RCC_CTRL_ENTER_LOW_POWER:
         case RCC_CTRL_EXIT_LOW_POWER:
             // Not implemented for this example, but could be added

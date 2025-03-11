@@ -45,7 +45,12 @@ struct RccConfig {
     // PLL configuration (if used)
     RccPllConfig pllConfig;    // PLL configuration
 };
-
+    struct SysCLockFreqs {
+        uint32_t systemClock;
+        uint32_t ahbClock;
+        uint32_t apb1Clock;
+        uint32_t apb2Clock;
+    };
 /**
  * RCC hardware interface implementation
  * Provides configuration and control of system clocks and peripheral clocks
@@ -57,11 +62,10 @@ private:
     
     // Clock configuration state
     RccConfig activeConfig;
-    uint32_t systemClockHz;
-    uint32_t ahbClockHz;
-    uint32_t apb1ClockHz;
-    uint32_t apb2ClockHz;
-    
+
+    // Clock frequency state
+    SysCLockFreqs clockFreqs;
+
     // Peripheral clock state tracking for efficient power management
     uint32_t enabledPeripheralsAHB1;
     uint32_t enabledPeripheralsAHB2;
@@ -92,19 +96,21 @@ public:
     Platform::Status EnablePeripheralClock(Platform::RCC::RccPeripheral peripheral);
     Platform::Status DisablePeripheralClock(Platform::RCC::RccPeripheral peripheral);
     Platform::Status ConfigureClockFrequency(uint32_t frequencyHz);
-    Platform::Status RccInterface::IsPeripheralClockEnabled(Platform::RCC::RccPeripheral peripheral, bool& enabled) const;
-    
+    Platform::Status IsPeripheralClockEnabled(Platform::RCC::RccPeripheral peripheral, bool& enabled) const;
+
     // Clock frequency getters
     uint32_t GetSystemClockFrequency() const;
     uint32_t GetAhbClockFrequency() const;
     uint32_t GetApb1ClockFrequency() const;
     uint32_t GetApb2ClockFrequency() const;
     
+    uint32_t GetResetFlags() const;
+
     // Default configuration creator
     static RccConfig CreateDefaultConfig();
     
     // Singleton pattern for RCC interface (only need one instance)
-    static RccInterface& GetInstance();
+    static std::shared_ptr<RccInterface> RccInterface::GetInstance();
 };
 
 // RCC control command identifiers
@@ -114,6 +120,10 @@ constexpr uint32_t RCC_CTRL_GET_CLOCK_FREQUENCY = 0x0403;
 constexpr uint32_t RCC_CTRL_SET_CLOCK_FREQUENCY = 0x0404;
 constexpr uint32_t RCC_CTRL_ENTER_LOW_POWER = 0x0405;
 constexpr uint32_t RCC_CTRL_EXIT_LOW_POWER = 0x0406;
+constexpr uint32_t RCC_CTRL_GET_RESET_FLAGS = 0x0407;
+constexpr uint32_t RCC_CTRL_CONFIGURE_SYSTEM_CLOCK = 0x0408;
+constexpr uint32_t RCC_CTRL_GET_ALL_CLOCK_FREQUENCIES = 0x0409;
+constexpr uint32_t RCC_CTRL_GET_CLOCK_SOURCE = 0x040A;
 
 }// namespace RCC       
 }// namespace Platform

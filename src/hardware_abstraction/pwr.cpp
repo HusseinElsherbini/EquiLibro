@@ -2,99 +2,24 @@
 #include "hardware_abstraction/pwr.hpp"
 #include "hardware_abstraction/rcc.hpp"
 #include "common/platform_cmsis.hpp"
-#include <mutex>
 
 namespace Platform {
 namespace PWR {
 
-// Singleton implementation
-class PowerInterfaceImpl : public PowerInterface {
-private:
-    // Internal state tracking
-    bool initialized;
-    PowerConfig config;
-
-    // Grant access to the GetInstance method
-    friend std::shared_ptr<PowerInterface> PowerInterface::GetInstance();
-    
-    // Mutex for thread safety
-    std::mutex power_mutex;
-    
-    // Callback table
-    struct CallbackEntry {
-        void (*callback)(void* param);
-        void* param;
-        bool enabled;
-    };
-    
-    CallbackEntry callbacks[static_cast<size_t>(PowerEvent::Max)];
-    
-    // Private constructor for singleton pattern
-    PowerInterfaceImpl();
-    
-    // Deleted copy constructor and assignment operator
-    PowerInterfaceImpl(const PowerInterfaceImpl&) = delete;
-    PowerInterfaceImpl& operator=(const PowerInterfaceImpl&) = delete;
-    
-public:
-    // Destructor
-    ~PowerInterfaceImpl() override;
-    
-    // Interface implementation
-    Platform::Status Init(void* config) override;
-    Platform::Status DeInit() override;
-    Platform::Status Control(uint32_t command, void* param) override;
-    Platform::Status Read(void* buffer, uint16_t size, uint32_t timeout) override;
-    Platform::Status Write(const void* data, uint16_t size, uint32_t timeout) override;
-    Platform::Status RegisterCallback(uint32_t eventId, void (*callback)(void* param), void* param) override;
-    
-    // Power mode control methods
-    Platform::Status EnterSleepMode(SleepEntryMode entry_mode) override;
-    Platform::Status EnterStopMode(RegulatorMode mode, SleepEntryMode entry_mode) override;
-    Platform::Status EnterStandbyMode() override;
-    
-    // Voltage scaling methods
-    Platform::Status SetVoltageScale(VoltageScale scale) override;
-    Platform::Status GetVoltageScale(VoltageScale& scale) override;
-    
-    // Regulator control methods
-    Platform::Status SetRegulatorMode(RegulatorMode mode) override;
-    Platform::Status GetRegulatorMode(RegulatorMode& mode) override;
-    
-    // Wake-up pin control methods
-    Platform::Status ConfigureWakeupPin(const WakeupPinConfig& config) override;
-    Platform::Status EnableWakeupPin(uint8_t pin_number) override;
-    Platform::Status DisableWakeupPin(uint8_t pin_number) override;
-    
-    // Backup domain control methods
-    Platform::Status EnableBackupDomainWrite() override;
-    Platform::Status DisableBackupDomainWrite() override;
-    bool IsBackupDomainWriteEnabled() const override;
-    
-    // Power voltage detector methods
-    Platform::Status ConfigurePVD(bool enable, uint8_t level) override;
-    Platform::Status GetPVDStatus(bool& triggered) const override;
-    
-    // Reset cause methods
-    bool IsWakeupFromStandby() const override;
-    bool IsWakeupFromStop() const override;
-    uint8_t GetWakeupPinFlag() const override;
-    Platform::Status ClearWakeupFlags() override;
-};
 
 // Static instance
-static std::shared_ptr<PowerInterfaceImpl> power_instance = nullptr;
+static std::shared_ptr<PowerInterfaceImpl> power_controller_instance = nullptr;
 static std::mutex instance_mutex;
 
 // Get singleton instance
 std::shared_ptr<PowerInterface> PowerInterface::GetInstance() {
     std::lock_guard<std::mutex> lock(instance_mutex);
     
-    if (!power_instance) {
-        power_instance = std::shared_ptr<PowerInterfaceImpl>(new PowerInterfaceImpl());
+    if (!power_controller_instance) {
+        power_controller_instance = std::shared_ptr<PowerInterfaceImpl>(new PowerInterfaceImpl());
     }
     
-    return power_instance;
+    return power_controller_instance;
 }
 
 // Constructor

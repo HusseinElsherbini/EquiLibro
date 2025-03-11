@@ -1,12 +1,14 @@
-﻿// inc/hardware_abstraction/systick.hpp
-
-#ifndef SYSTICK_HPP
-#define SYSTICK_HPP
+﻿#pragma once
 
 #include "hw_interface.hpp"
 #include "common/platform.hpp"
 #include "common/platform_cmsis.hpp"
+#include <memory>
+#include <mutex>
 
+namespace Platform {
+namespace CMSIS {
+namespace SysTick {
 /**
  * Configuration structure for SysTick timer
  */
@@ -49,7 +51,9 @@ private:
 
     // Private constructor for singleton pattern
     SysTickInterface();
-    
+
+    std::shared_ptr<SysTickInterface> SysTickInterface::systick_instance;
+    std::mutex SysTickInterface::instance_mutex;    
     // Deleted copy constructor and assignment operator
     SysTickInterface(const SysTickInterface&) = delete;
     SysTickInterface& operator=(const SysTickInterface&) = delete;
@@ -58,13 +62,15 @@ public:
     // Destructor
     ~SysTickInterface() override;
     
+
+
     // Interface implementation
-    Platform::Status Init(void* config) override;
-    Platform::Status DeInit() override;
-    Platform::Status Control(uint32_t command, void* param) override;
-    Platform::Status Read(void* buffer, uint16_t size, uint32_t timeout) override;
-    Platform::Status Write(const void* data, uint16_t size, uint32_t timeout) override;
-    Platform::Status RegisterCallback(uint32_t eventId, void (*callback)(void* param), void* param) override;
+    Status Init(void* config) override;
+    Status DeInit() override;
+    Status Control(uint32_t command, void* param) override;
+    Status Read(void* buffer, uint16_t size, uint32_t timeout) override;
+    Status Write(const void* data, uint16_t size, uint32_t timeout) override;
+    Status RegisterCallback(uint32_t eventId, void (*callback)(void* param), void* param) override;
     
     // SysTick-specific methods
     uint32_t GetCurrentValue() const;
@@ -77,7 +83,7 @@ public:
     friend void SysTick_IRQHandler(void);
     
     // Singleton pattern for SysTick interface (only need one instance)
-    static SysTickInterface& GetInstance();
+    std::shared_ptr<SysTickInterface> GetInstance();
 };
 
 // SysTick control command identifiers
@@ -87,4 +93,6 @@ constexpr uint32_t SYSTICK_CTRL_RELOAD = 0x0803;    // Reload SysTick counter
 constexpr uint32_t SYSTICK_CTRL_GET_TICKFREQ = 0x0804; // Get tick frequency in Hz
 constexpr uint32_t SYSTICK_CTRL_SET_CALLBACK = 0x0805; // Set callback for tick event
 
-#endif /* SYSTICK_HPP */
+}
+}
+}

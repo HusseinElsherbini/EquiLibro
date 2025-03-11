@@ -9,44 +9,22 @@
 namespace Middleware {
 namespace SystemServices {
 
-/**
- * @brief Power mode configuration
- */
-enum class PowerMode {
-    Run,            // Normal run mode
-    LowPower,       // Low power run mode
-    Sleep,          // Sleep mode (CPU off, peripherals on)
-    DeepSleep,      // Deep sleep mode (CPU off, some peripherals off)
-    Standby         // Standby mode (lowest power, only RTC and backup registers)
-};
-
-
 
 /**
  * @brief System initialization configuration
  */
 struct SystemInitConfig {
 
-    Platform::RCC::RccConfig SysClockConfig;
-    Platform::FLASH::FlashConfig FlashConfig;
-    Platform::PWR::PowerConfig PowerConfig;
+    Platform::RCC::RccConfig SysClockConfig;    // System clock configuration
+    Platform::FLASH::FlashConfig FlashConfig;   // Flash configuration
+    Platform::PWR::PowerConfig PowerConfig;     // Power management configuration
 
-    // Bus dividers
-    uint8_t ahbDivider;             // AHB bus clock divider (1, 2, 4, 8, 16, 64, 128, 256, 512)
-    uint8_t apb1Divider;            // APB1 bus clock divider (1, 2, 4, 8, 16)
-    uint8_t apb2Divider;            // APB2 bus clock divider (1, 2, 4, 8, 16)
-    
     // Core peripheral configuration
     bool enableSysTick;             // Enable SysTick timer
     uint32_t sysTickInterval;       // SysTick interval in microseconds
     bool enableMPU;                 // Enable Memory Protection Unit
     bool enableFPU;                 // Enable Floating Point Unit
-    bool enableICache;              // Enable instruction cache
-    bool enableDCache;              // Enable data cache
-    bool enablePrefetch;            // Enable flash prefetch
     
-    // Power management
-    PowerMode initialPowerMode;     // Initial power mode after initialization
 };
 
 /**
@@ -57,14 +35,14 @@ struct SystemInfo {
     uint32_t ahbClock;              // AHB bus clock frequency in Hz
     uint32_t apb1Clock;             // APB1 bus clock frequency in Hz
     uint32_t apb2Clock;             // APB2 bus clock frequency in Hz
-    ClockSource clockSource;        // Current clock source
+    Platform::RCC::RccClockSource clockSource;        // Current clock source
     bool pllEnabled;                // Whether PLL is enabled
     bool mpuEnabled;                // Whether MPU is enabled
     bool fpuEnabled;                // Whether FPU is enabled
     bool icacheEnabled;             // Whether instruction cache is enabled
     bool dcacheEnabled;             // Whether data cache is enabled
     bool prefetchEnabled;           // Whether flash prefetch is enabled
-    PowerMode currentPowerMode;     // Current power mode
+    Platform::PWR::PowerMode currentPowerMode;     // Current power mode
     uint8_t flashLatency;           // Current flash latency (wait states)
     uint64_t uptimeMs;              // System uptime in milliseconds
     uint32_t resetCause;            // Cause of the last reset
@@ -116,12 +94,12 @@ public:
     virtual uint32_t GetAHBClock() const = 0;
     virtual uint32_t GetAPB1Clock() const = 0;
     virtual uint32_t GetAPB2Clock() const = 0;
-    virtual ClockSource GetClockSource() const = 0;
+    virtual Platform::RCC::RccClockSource GetClockSource() const = 0;
     virtual bool IsPLLEnabled() const = 0;
     
     // Power management functions
-    virtual Platform::Status SetPowerMode(PowerMode mode) = 0;
-    virtual PowerMode GetPowerMode() const = 0;
+    virtual Platform::Status SetPowerMode(Platform::PWR::PowerMode mode) = 0;
+    virtual Platform::PWR::PowerMode GetPowerMode() const = 0;
     
     // System functions
     virtual Platform::Status SoftwareReset() = 0;
@@ -174,7 +152,7 @@ inline uint32_t GetAPB2Clock() {
     return SystemInit::GetInstance().GetAPB2Clock();
 }
 
-inline PowerMode GetPowerMode() {
+inline Platform::PWR::PowerMode GetPowerMode() {
     return SystemInit::GetInstance().GetPowerMode();
 }
 
@@ -194,9 +172,9 @@ class SystemInitImpl : public SystemInit {
             uint32_t ahb_clock_freq;
             uint32_t apb1_clock_freq;
             uint32_t apb2_clock_freq;
-            ClockSource clock_source;
+            Platform::RCC::RccClockSource clock_source;
             bool pll_enabled;
-            PowerMode current_power_mode;
+            Platform::PWR::PowerMode current_power_mode;
             uint8_t flash_latency;
             uint32_t reset_cause;
             bool mpu_enabled;
@@ -207,8 +185,10 @@ class SystemInitImpl : public SystemInit {
         } system_state;
         
         // Hardware interface references
+        std::shared_ptr<Platform::FLASH::FlashInterface> flash_interface;
+        std::shared_ptr<Platform::PWR::PowerInterface> power_interface;
         std::shared_ptr<Platform::RCC::RccInterface> rcc_interface;
-        std::shared_ptr<SysTickInterface> systick_interface;
+        std::shared_ptr<Platform::CMSIS::SysTick::SysTickInterface> systick_interface;
         
         // Registered callbacks
         struct CallbackEntry {
@@ -221,7 +201,7 @@ class SystemInitImpl : public SystemInit {
         
         // Private methods
         Platform::Status ConfigureSystemClock();
-        Platform::Status ConfigureFlashLatency(uint32_t system_clock_freq, FlashLatency latency);
+        Platform::Status ConfigureFlashLatency(uint32_t system_clock_freq, Platform::FLASH::FlashLatency latency);
         Platform::Status ConfigureSysTick(uint32_t interval_us);
         Platform::Status ConfigureMPU();
         Platform::Status ConfigureFPU();
@@ -247,11 +227,11 @@ class SystemInitImpl : public SystemInit {
         uint32_t GetAHBClock() const override;
         uint32_t GetAPB1Clock() const override;
         uint32_t GetAPB2Clock() const override;
-        ClockSource GetClockSource() const override;
+        Platform::RCC::RccClockSource GetClockSource() const override;
         bool IsPLLEnabled() const override;
         
-        Platform::Status SetPowerMode(PowerMode mode) override;
-        PowerMode GetPowerMode() const override;
+        Platform::Status SetPowerMode(Platform::PWR::PowerMode mode) override;
+        Platform::PWR::PowerMode GetPowerMode() const override;
         
         Platform::Status SoftwareReset() override;
         ResetCause GetResetCause() const override;

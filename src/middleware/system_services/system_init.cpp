@@ -41,99 +41,67 @@ SystemInitConfig SystemInit::GetDefaultConfig() {
     config.SysClockConfig.apb2Prescaler = 1;
 
     config.FlashConfig.latency = Platform::FLASH::FlashLatency::WS4;
+    config.FlashConfig.prefetch_enable = true;
+    config.FlashConfig.icache_enable = true;
+    config.FlashConfig.dcache_enable = true;
 
     config.PowerConfig.voltage_scale = Platform::PWR::VoltageScale::Scale1;
-    
+    config.PowerConfig.regulator_mode = Platform::PWR::RegulatorMode::Normal;
+    config.PowerConfig.power_mode = Platform::PWR::PowerMode::Run;
 
-    config.SysClockConfig.initialPowerMode = Platform::RCC::PowerMode::Run;
-    config.SysClockConfig.enableSysTick = true;
-    config.SysClockConfig.sysTickInterval = 1000;  // 1ms SysTick interval
-    config.SysClockConfig.enableMPU = false;
-    config.SysClockConfig.enableFPU = true;
-    config.SysClockConfig.enableICache = true;
-    config.SysClockConfig.enableDCache = true;
-    config.SysClockConfig.enablePrefetch = true;
-
-    config.targetSystemClock = 84000000;      // 84 MHz
-    config.clockSource = ClockSource::PLL;
-    config.hseFrequency = 25000000;           // External oscillator typically 25MHz or 8MHz
-    config.enablePLL = true;
-    
-    // PLL configuration for 84 MHz from 25 MHz HSE
-    config.pllConfig.autoCalculate = true;
-    config.pllConfig.source = ClockSource::HSE;
-    config.pllConfig.m = 25;                  // VCO input = 25MHz / 25 = 1MHz
-    config.pllConfig.n = 336;                 // VCO output = 1MHz * 336 = 336MHz
-    config.pllConfig.p = 4;                   // System clock = 336MHz / 4 = 84MHz
-    config.pllConfig.q = 7;                   // USB clock = 336MHz / 7 = 48MHz
-    
-    // Flash latency - auto calculation
-    config.flashLatency = FlashLatency::AutoCalculate;
-    
-    // Bus dividers
-    config.ahbDivider = 1;                    // AHB = SYSCLK
-    config.apb1Divider = 2;                   // APB1 = HCLK/2 (42 MHz max)
-    config.apb2Divider = 1;                   // APB2 = HCLK
-    
-    // Core peripheral configuration
     config.enableSysTick = true;
-    config.sysTickInterval = 1000;            // 1ms SysTick interval
+    config.sysTickInterval = 1000;  // 1ms SysTick interval
     config.enableMPU = false;
-    config.enableFPU = true;                  // STM32F4 has hardware FPU
-    config.enableICache = true;
-    config.enableDCache = true;
-    config.enablePrefetch = true;
-    
-    // Power management
-    config.initialPowerMode = PowerMode::Run;
+    config.enableFPU = true;
+
     
     return config;
 }
 
 // Low power configuration preset
 SystemInitConfig SystemInit::GetLowPowerConfig() {
+
     SystemInitConfig config = GetDefaultConfig();
     
     // Reduce clock frequency for lower power
-    config.targetSystemClock = 16000000;       // 16 MHz
-    config.clockSource = ClockSource::HSI;     // Use internal oscillator
-    config.enablePLL = false;                  // No PLL needed
+    config.SysClockConfig.systemClockHz = 16000000;       // 16 MHz
+    config.SysClockConfig.clockSource = Platform::RCC::RccClockSource::HSI;     // Use internal oscillator
+    config.SysClockConfig.pllConfig.autoCalculate = false;                  // No PLL needed
     
     // Adjust flash latency for lower frequency
-    config.flashLatency = FlashLatency::WS0;   // 0 wait states for 16MHz
-    
+    config.FlashConfig.latency = Platform::FLASH::FlashLatency::WS0;   // 0 wait states for 16MHz
+    config.FlashConfig.dcache_enable = false;                         // Disable data cache
+    config.FlashConfig.icache_enable = false;                         // Disable instruction cache
+
     // Bus dividers optimized for low power
-    config.ahbDivider = 1;                     // AHB = SYSCLK
-    config.apb1Divider = 1;                    // APB1 = HCLK
-    config.apb2Divider = 1;                    // APB2 = HCLK
-    
-    // Disable features for lower power
-    config.enableICache = false;
-    config.enableDCache = false;
-    
+    config.SysClockConfig.ahbPrescaler = 1;                     // AHB = SYSCLK
+    config.SysClockConfig.apb1Prescaler = 1;                    // APB1 = HCLK
+    config.SysClockConfig.apb2Prescaler = 1;                    // APB2 = HCLK
+
     // Set low power mode
-    config.initialPowerMode = PowerMode::LowPower;
+    config.PowerConfig.power_mode = Platform::PWR::PowerMode::LowPower;
     
     return config;
 }
 
 // Maximum performance configuration preset
 SystemInitConfig SystemInit::GetMaxPerformanceConfig() {
+
     SystemInitConfig config = GetDefaultConfig();
     
     // Maximum clock for STM32F401
-    config.targetSystemClock = 84000000;      // 84 MHz
-    config.clockSource = ClockSource::PLL;
-    config.hseFrequency = 25000000;           // Use external oscillator for better stability
-    config.enablePLL = true;
-    
-    // PLL configuration for maximum performance
-    config.pllConfig.autoCalculate = true;
+    config.SysClockConfig.systemClockHz = 84000000;  // 84 MHz
+    config.SysClockConfig.clockSource = Platform::RCC::RccClockSource::PLL;
+    config.SysClockConfig.hseFrequencyHz = 25000000;  // 25 MHz external crystal
+    config.SysClockConfig.pllConfig.autoCalculate = true;
+    config.SysClockConfig.pllConfig.source = Platform::RCC::RccClockSource::HSE;
+
     
     // Enable all performance enhancing features
-    config.enableICache = true;
-    config.enableDCache = true;
-    config.enablePrefetch = true;
+    config.FlashConfig.prefetch_enable = true;
+    config.FlashConfig.icache_enable = true;
+    config.FlashConfig.dcache_enable = true;
+
     config.enableFPU = true;
     
     return config;
@@ -148,9 +116,9 @@ SystemInitImpl::SystemInitImpl()
     system_state.ahb_clock_freq = 16000000;
     system_state.apb1_clock_freq = 16000000;
     system_state.apb2_clock_freq = 16000000;
-    system_state.clock_source = ClockSource::HSI;
+    system_state.clock_source = Platform::RCC::RccClockSource::HSI;
     system_state.pll_enabled = false;
-    system_state.current_power_mode = PowerMode::Run;
+    system_state.current_power_mode = Platform::PWR::PowerMode::Run;
     system_state.flash_latency = 0;
     system_state.reset_cause = static_cast<uint32_t>(ResetCause::PowerOn);
     system_state.mpu_enabled = false;
@@ -187,11 +155,30 @@ Platform::Status SystemInitImpl::Init(void* config) {
     } else {
         this->config = *static_cast<SystemInitConfig*>(config);
     }
+        // Acquire hardware interfaces
+    rcc_interface = Platform::RCC::RccInterface::GetInstance();
+    if (!rcc_interface) {
+        return Platform::Status::ERROR;
+    }
     
+    power_interface = Platform::PWR::PowerInterface::GetInstance();
+    if (!power_interface) {
+        return Platform::Status::ERROR;
+    }
+    
+    flash_interface = Platform::FLASH::FlashInterface::GetInstance();
+    if (!flash_interface) {
+        return Platform::Status::ERROR;
+    }
+    
+    systick_interface = Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
+    if (!systick_interface) {
+        return Platform::Status::ERROR;
+    }
     // Determine the cause of the reset
     system_state.reset_cause = static_cast<uint32_t>(DetermineResetCause());
     ClearResetFlags();
-    
+
     // Get hardware interfaces
     rcc_interface = std::make_shared<Platform::RCC::RccInterface>();
     if (!rcc_interface) {
@@ -205,7 +192,7 @@ Platform::Status SystemInitImpl::Init(void* config) {
     }
     
     // Configure flash latency based on system clock
-    status = ConfigureFlashLatency(system_state.system_clock_freq, this->config.flashLatency);
+    status = ConfigureFlashLatency(system_state.system_clock_freq, this->config.FlashConfig.latency);
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -241,7 +228,7 @@ Platform::Status SystemInitImpl::Init(void* config) {
     }
     
     // Set initial power mode
-    status = SetPowerMode(this->config.initialPowerMode);
+    status = SetPowerMode(this->config.PowerConfig.power_mode);
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -279,41 +266,34 @@ Platform::Status SystemInitImpl::Configure(uint32_t param_id, void* value) {
     
     switch (param_id) {
         case SYSTEM_PARAM_CLOCK_SOURCE: {
-            ClockSource* new_source = static_cast<ClockSource*>(value);
-            config.clockSource = *new_source;
+            Platform::RCC::RccClockSource* new_source = static_cast<Platform::RCC::RccClockSource*>(value);
+            config.SysClockConfig.clockSource = *new_source;
             return ConfigureSystemClock();
         }
         
         case SYSTEM_PARAM_PLL_CONFIG: {
-            PLLConfig* new_config = static_cast<PLLConfig*>(value);
-            config.pllConfig = *new_config;
-            config.enablePLL = true;
+            Platform::RCC::RccPllConfig* new_config = static_cast<Platform::RCC::RccPllConfig*>(value);
+            config.SysClockConfig.pllConfig = *new_config;
             return ConfigureSystemClock();
         }
         
         case SYSTEM_PARAM_FLASH_LATENCY: {
-            FlashLatency* new_latency = static_cast<FlashLatency*>(value);
-            config.flashLatency = *new_latency;
+            Platform::FLASH::FlashLatency* new_latency = static_cast<Platform::FLASH::FlashLatency*>(value);
+            config.FlashConfig.latency = *new_latency;
             return ConfigureFlashLatency(system_state.system_clock_freq, *new_latency);
         }
         
         case SYSTEM_PARAM_POWER_MODE: {
-            PowerMode* new_mode = static_cast<PowerMode*>(value);
+            Platform::PWR::PowerMode* new_mode = static_cast<Platform::PWR::PowerMode*>(value);
             return SetPowerMode(*new_mode);
         }
         
         case SYSTEM_PARAM_CACHE_CONTROL: {
             // Example structure for cache control
-            struct CacheControl {
-                bool enableICache;
-                bool enableDCache;
-                bool enablePrefetch;
-            };
-            
-            CacheControl* cache_config = static_cast<CacheControl*>(value);
-            config.enableICache = cache_config->enableICache;
-            config.enableDCache = cache_config->enableDCache;
-            config.enablePrefetch = cache_config->enablePrefetch;
+            Platform::FLASH::FlashConfig* cache_config = static_cast<Platform::FLASH::FlashConfig*>(value);
+            config.FlashConfig.icache_enable = cache_config->icache_enable;
+            config.FlashConfig.dcache_enable = cache_config->dcache_enable;
+            config.FlashConfig.prefetch_enable = cache_config->prefetch_enable;
             return ConfigureCache();
         }
         
@@ -485,7 +465,7 @@ uint32_t SystemInitImpl::GetAPB2Clock() const {
 }
 
 // Get the current clock source
-ClockSource SystemInitImpl::GetClockSource() const {
+Platform::RCC::RccClockSource SystemInitImpl::GetClockSource() const {
     return system_state.clock_source;
 }
 
@@ -495,8 +475,10 @@ bool SystemInitImpl::IsPLLEnabled() const {
 }
 
 // Set the system power mode
-Platform::Status SystemInitImpl::SetPowerMode(PowerMode mode) {
-    if (!initialized && mode != PowerMode::Run) {
+Platform::Status SystemInitImpl::SetPowerMode(Platform::PWR::PowerMode mode) {
+
+    using namespace Platform::PWR;
+    if (!initialized && mode != Platform::PWR::PowerMode::Run) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
@@ -514,12 +496,13 @@ Platform::Status SystemInitImpl::SetPowerMode(PowerMode mode) {
                 // Set voltage scaling to range 2 (lower power)
                 // This requires accessing PWR peripheral registers
                 // Read PWR_CR register to modify VOS bits
-                volatile uint32_t* pwr_cr = reinterpret_cast<volatile uint32_t*>(0x40007000);
-                *pwr_cr = (*pwr_cr & ~(0x3 << 14)) | (0x2 << 14);
+                volatile Registers* pwr_regs = getRegisters();
+
+                // Set VOS bits to range 2
+                pwr_regs->CR = (pwr_regs->CR & ~(static_cast<uint32_t>(CR::VOS_MSK))) | (static_cast<uint32_t>(CR::VOS_SCALE2));
                 
                 // Wait for stabilization
-                volatile uint32_t* pwr_csr = reinterpret_cast<volatile uint32_t*>(0x40007004);
-                while (!(*pwr_csr & (1 << 14))) {
+                while (!(pwr_regs->CSR & (static_cast<uint32_t>(CSR::VOSRDY)))) {
                     // Wait for VOSRDY bit
                 }
             }
@@ -546,8 +529,8 @@ Platform::Status SystemInitImpl::SetPowerMode(PowerMode mode) {
             Platform::CMSIS::SCB::getRegisters()->SCR |= (1 << 2); // SLEEPDEEP
             
             // Set PDDS bit in PWR_CR
-            volatile uint32_t* pwr_cr = reinterpret_cast<volatile uint32_t*>(0x40007000);
-            *pwr_cr |= (1 << 1); // PDDS
+            volatile Registers* pwr_regs = getRegisters();
+            pwr_regs->CR |= (static_cast<uint32_t>(CR::PDDS)); // PDDS
             
             // Execute WFI instruction
             __asm volatile("wfi");
@@ -571,7 +554,7 @@ Platform::Status SystemInitImpl::SetPowerMode(PowerMode mode) {
 }
 
 // Get the current power mode
-PowerMode SystemInitImpl::GetPowerMode() const {
+Platform::PWR::PowerMode SystemInitImpl::GetPowerMode() const {
     return system_state.current_power_mode;
 }
 
@@ -720,73 +703,11 @@ Platform::Status SystemInitImpl::WriteSystemRegister(uint32_t reg_addr, uint32_t
 Platform::Status SystemInitImpl::ConfigureSystemClock() {
 
 
-    // Create RCC configuration from the system configuration
-    Platform::RCC::RccConfig rcc_config = {};
-    
-    // Map clock source
-    switch (config.clockSource) {
-        case ClockSource::HSI:
-            rcc_config.clockSource = Platform::RCC::RccClockSource::HSI;
-            break;
-        case ClockSource::HSE:
-            rcc_config.clockSource = Platform::RCC::RccClockSource::HSE;
-            rcc_config.hseFrequencyHz = config.hseFrequency;
-            break;
-        case ClockSource::HSE_BYPASS:
-            // For HSE bypass, use HSE and then set the bypass bit separately
-            rcc_config.clockSource = Platform::RCC::RccClockSource::HSE;
-            rcc_config.hseFrequencyHz = config.hseFrequency;
-            // Set the bypass bit directly in the register
-            {
-                volatile uint32_t* rcc_cr = reinterpret_cast<volatile uint32_t*>(0x40023800);
-                *rcc_cr |= (1 << 18); // HSEBYP bit
-                break;
-            }
-        case ClockSource::PLL:
-            rcc_config.clockSource = Platform::RCC::RccClockSource::PLL;
-            
-            // Configure PLL
-            rcc_config.use_pll = true;
-            
-            if (config.pllConfig.autoCalculate) {
-                rcc_config.target_frequency = config.targetSystemClock;
-                rcc_config.pll_config.auto_calculate = true;
-                
-                // Set PLL source
-                if (config.pllConfig.source == ClockSource::HSE) {
-                    rcc_config.pll_config.source = RccClockSource::HSE;
-                    rcc_config.hse_frequency = config.hseFrequency;
-                } else {
-                    rcc_config.pll_config.source = RccClockSource::HSI;
-                }
-            } else {
-                // Use manual PLL configuration
-                rcc_config.pll_config.auto_calculate = false;
-                rcc_config.pll_config.m = config.pllConfig.m;
-                rcc_config.pll_config.n = config.pllConfig.n;
-                rcc_config.pll_config.p = config.pllConfig.p;
-                rcc_config.pll_config.q = config.pllConfig.q;
-                
-                // Set PLL source
-                if (config.pllConfig.source == ClockSource::HSE) {
-                    rcc_config.pll_config.source = RccClockSource::HSE;
-                    rcc_config.hse_frequency = config.hseFrequency;
-                } else {
-                    rcc_config.pll_config.source = RccClockSource::HSI;
-                }
-            }
-            break;
-        default:
-            return Platform::Status::INVALID_PARAM;
-    }
-    
-    // Set bus dividers
-    rcc_config.ahb_divider = config.ahbDivider;
-    rcc_config.apb1_divider = config.apb1Divider;
-    rcc_config.apb2_divider = config.apb2Divider;
-    
+    // Configure the system clock based on the provided configuration
     // Initialize RCC with the configuration
-    Platform::Status status = rcc_interface->Init(&rcc_config);
+
+
+    Platform::Status status = rcc_interface->Control(Platform::RCC::RCC_CTRL_CONFIGURE_SYSTEM_CLOCK, &config.SysClockConfig);
     if (status != Platform::Status::OK) {
         // Trigger error callback if registered
         if (callbacks[static_cast<uint32_t>(SystemEvent::ErrorDetected)].active) {
@@ -799,26 +720,45 @@ Platform::Status SystemInitImpl::ConfigureSystemClock() {
     
     // Get the actual system and bus clocks that were set
     uint32_t system_clock;
-    rcc_interface->Control(RCC_CTRL_GET_SYSTEM_CLOCK, &system_clock);
+    status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_CLOCK_FREQUENCY, &system_clock);
     
+    if (status != Platform::Status::OK) {
+        return status;
+    }
+
+
     // Update system state with the actual clock frequencies
-    system_state.system_clock_freq = system_clock;
-    system_state.ahb_clock_freq = system_clock / config.ahbDivider;
-    system_state.apb1_clock_freq = system_state.ahb_clock_freq / config.apb1Divider;
-    system_state.apb2_clock_freq = system_state.ahb_clock_freq / config.apb2Divider;
+
+    Platform::RCC::SysCLockFreqs clock_freqs;
+    status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_ALL_CLOCK_FREQUENCIES, &clock_freqs);
+
+    if (status != Platform::Status::OK) {
+        return status;
+    }
+
+    system_state.system_clock_freq = clock_freqs.systemClock;
+    system_state.ahb_clock_freq = clock_freqs.ahbClock;
+    system_state.apb1_clock_freq = clock_freqs.apb1Clock;
+    system_state.apb2_clock_freq = clock_freqs.apb2Clock;
     
+    Platform::RCC::RccClockSource clock_source;
     // Update clock source and PLL status in system state
-    system_state.clock_source = config.clockSource;
-    system_state.pll_enabled = config.enablePLL;
+    status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_CLOCK_SOURCE, &clock_source);
+    if (status != Platform::Status::OK) {
+        return status;
+    }
+
+    system_state.clock_source = clock_source;
+    system_state.pll_enabled = config.SysClockConfig.pllConfig.autoCalculate;
     
     return Platform::Status::OK;
 }
 // Configure flash latency based on system clock frequency
-Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_freq, FlashLatency latency) {
+Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_freq, Platform::FLASH::FlashLatency latency) {
     // Calculate appropriate latency based on system clock if auto mode is selected
     uint8_t flash_wait_states;
     
-    if (latency == FlashLatency::AutoCalculate) {
+    if (latency == Platform::FLASH::FlashLatency::AUTOCALCULATE) {
         // For STM32F401 (3.3V operation):
         // 0 WS: 0 < HCLK ≤ 24 MHz
         // 1 WS: 24 MHz < HCLK ≤ 48 MHz
@@ -836,22 +776,22 @@ Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_fre
     } else {
         // Use the specified latency
         switch (latency) {
-            case FlashLatency::WS0:
+            case Platform::FLASH::FlashLatency::WS0:
                 flash_wait_states = 0;
                 break;
-            case FlashLatency::WS1:
+            case Platform::FLASH::FlashLatency::WS1:
                 flash_wait_states = 1;
                 break;
-            case FlashLatency::WS2:
+            case Platform::FLASH::FlashLatency::WS2:
                 flash_wait_states = 2;
                 break;
-            case FlashLatency::WS3:
+            case Platform::FLASH::FlashLatency::WS3:
                 flash_wait_states = 3;
                 break;
-            case FlashLatency::WS4:
+            case Platform::FLASH::FlashLatency::WS4:
                 flash_wait_states = 4;
                 break;
-            case FlashLatency::WS5:
+            case Platform::FLASH::FlashLatency::WS5:
                 flash_wait_states = 5;
                 break;
             default:
@@ -870,19 +810,19 @@ Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_fre
     reg_value |= flash_wait_states;  // Set new latency
     
     // Configure flash features based on configuration
-    if (config.enablePrefetch) {
+    if (config.FlashConfig.prefetch_enable) {
         reg_value |= Platform::FLASH::getBitValue(Platform::FLASH::ACR::PRFTEN); // PRFTEN bit
     } else {
         reg_value &= ~Platform::FLASH::getBitValue(Platform::FLASH::ACR::PRFTEN);
     }
     
-    if (config.enableICache) {
+    if (config.FlashConfig.icache_enable) {
         reg_value |= Platform::FLASH::getBitValue(Platform::FLASH::ACR::ICEN); // ICEN bit
     } else {
         reg_value &= ~Platform::FLASH::getBitValue(Platform::FLASH::ACR::ICEN);
     }
     
-    if (config.enableDCache) {
+    if (config.FlashConfig.dcache_enable) {
         reg_value |= Platform::FLASH::getBitValue(Platform::FLASH::ACR::DCEN); // DCEN bit
     } else {
         reg_value &= ~Platform::FLASH::getBitValue(Platform::FLASH::ACR::DCEN);
@@ -898,9 +838,9 @@ Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_fre
     
     // Update system state
     system_state.flash_latency = flash_wait_states;
-    system_state.prefetch_enabled = config.enablePrefetch;
-    system_state.icache_enabled = config.enableICache;
-    system_state.dcache_enabled = config.enableDCache;
+    system_state.prefetch_enabled = config.FlashConfig.prefetch_enable;
+    system_state.icache_enabled = config.FlashConfig.icache_enable;
+    system_state.dcache_enabled = config.FlashConfig.dcache_enable;
     
     return Platform::Status::OK;
 }
@@ -908,7 +848,7 @@ Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_fre
 // Configure SysTick timer
 Platform::Status SystemInitImpl::ConfigureSysTick(uint32_t interval_us) {
     // Get SysTick interface
-    systick_interface = SysTickInterface::GetInstance();
+    systick_interface = Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
     
     // Calculate reload value based on system clock and desired interval
     uint32_t reload_value = (system_state.system_clock_freq / 1000000) * interval_us;

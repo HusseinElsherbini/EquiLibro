@@ -5,6 +5,7 @@
 #include "common/platform.hpp"
 #include "common/platform_pwr.hpp"
 #include <memory>
+#include <mutex>
 
 namespace Platform {
 namespace PWR {
@@ -45,6 +46,17 @@ struct WakeupPinConfig {
 };
 
 /**
+ * @brief Power mode configuration
+ */
+enum class PowerMode {
+    Run,            // Normal run mode
+    LowPower,       // Low power run mode
+    Sleep,          // Sleep mode (CPU off, peripherals on)
+    DeepSleep,      // Deep sleep mode (CPU off, some peripherals off)
+    Standby         // Standby mode (lowest power, only RTC and backup registers)
+};
+
+/**
  * @brief Power controller configuration
  */
 struct PowerConfig {
@@ -56,6 +68,7 @@ struct PowerConfig {
     bool wakeup_pin_config[3];           // Configuration for wake-up pins
     bool pvd_enable;                     // Power voltage detector enable
     uint8_t pvd_level;                   // Power voltage detector level (0-7)
+    PowerMode power_mode;                // power mode
 };
 
 /**
@@ -109,6 +122,80 @@ public:
     virtual Platform::Status ClearWakeupFlags() = 0;
 };
 
+// Singleton implementation
+class PowerInterfaceImpl : public PowerInterface {
+    private:
+        // Internal state tracking
+        bool initialized;
+        PowerConfig config;
+    
+        // Grant access to the GetInstance method
+        friend std::shared_ptr<PowerInterface> PowerInterface::GetInstance();
+        
+        // Mutex for thread safety
+        std::mutex power_mutex;
+        
+        // Callback table
+        struct CallbackEntry {
+            void (*callback)(void* param);
+            void* param;
+            bool enabled;
+        };
+        
+        CallbackEntry callbacks[static_cast<size_t>(PowerEvent::Max)];
+        
+        // Private constructor for singleton pattern
+        PowerInterfaceImpl();
+        
+        // Deleted copy constructor and assignment operator
+        PowerInterfaceImpl(const PowerInterfaceImpl&) = delete;
+        PowerInterfaceImpl& operator=(const PowerInterfaceImpl&) = delete;
+        
+    public:
+        // Destructor
+        ~PowerInterfaceImpl() override;
+        
+        // Interface implementation
+        Platform::Status Init(void* config) override;
+        Platform::Status DeInit() override;
+        Platform::Status Control(uint32_t command, void* param) override;
+        Platform::Status Read(void* buffer, uint16_t size, uint32_t timeout) override;
+        Platform::Status Write(const void* data, uint16_t size, uint32_t timeout) override;
+        Platform::Status RegisterCallback(uint32_t eventId, void (*callback)(void* param), void* param) override;
+        
+        // Power mode control methods
+        Platform::Status EnterSleepMode(SleepEntryMode entry_mode) override;
+        Platform::Status EnterStopMode(RegulatorMode mode, SleepEntryMode entry_mode) override;
+        Platform::Status EnterStandbyMode() override;
+        
+        // Voltage scaling methods
+        Platform::Status SetVoltageScale(VoltageScale scale) override;
+        Platform::Status GetVoltageScale(VoltageScale& scale) override;
+        
+        // Regulator control methods
+        Platform::Status SetRegulatorMode(RegulatorMode mode) override;
+        Platform::Status GetRegulatorMode(RegulatorMode& mode) override;
+        
+        // Wake-up pin control methods
+        Platform::Status ConfigureWakeupPin(const WakeupPinConfig& config) override;
+        Platform::Status EnableWakeupPin(uint8_t pin_number) override;
+        Platform::Status DisableWakeupPin(uint8_t pin_number) override;
+        
+        // Backup domain control methods
+        Platform::Status EnableBackupDomainWrite() override;
+        Platform::Status DisableBackupDomainWrite() override;
+        bool IsBackupDomainWriteEnabled() const override;
+        
+        // Power voltage detector methods
+        Platform::Status ConfigurePVD(bool enable, uint8_t level) override;
+        Platform::Status GetPVDStatus(bool& triggered) const override;
+        
+        // Reset cause methods
+        bool IsWakeupFromStandby() const override;
+        bool IsWakeupFromStop() const override;
+        uint8_t GetWakeupPinFlag() const override;
+        Platform::Status ClearWakeupFlags() override;
+};
 // Power control command identifiers (for HwInterface::Control)
 constexpr uint32_t POWER_CTRL_ENTER_SLEEP = 0x0601;
 constexpr uint32_t POWER_CTRL_ENTER_STOP = 0x0602;
@@ -129,35 +216,6 @@ constexpr uint32_t POWER_CTRL_IS_WAKEUP_FROM_STANDBY = 0x0610;
 constexpr uint32_t POWER_CTRL_IS_WAKEUP_FROM_STOP = 0x0611;
 constexpr uint32_t POWER_CTRL_GET_WAKEUP_PIN_FLAG = 0x0612;
 constexpr uint32_t POWER_CTRL_CLEAR_WAKEUP_FLAGS = 0x0613;
-
-/**
- * @brief Platform-specific register definitions for the power controller
- */
-
-// Helper functions for bit manipulation
-constexpr uint32_t getBitValue(CR bit) {
-    return static_cast<uint32_t>(bit);
-}
-
-constexpr uint32_t getBitValue(CSR bit) {
-    return static_cast<uint32_t>(bit);
-}
-
-// Operator overloads for combining flags
-constexpr CR operator|(CR a, CR b) {
-    return static_cast<CR>(
-        static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
-}
-
-constexpr CSR operator|(CSR a, CSR b) {
-    return static_cast<CSR>(
-        static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
-}
-
-// Access function for PWR registers
-inline Registers* getRegisters() {
-    return reinterpret_cast<Registers*>(PWR_BASE);
-}
 
 } // namespace PWR
 } // namespace Platform
