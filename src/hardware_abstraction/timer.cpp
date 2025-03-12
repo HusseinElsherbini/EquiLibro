@@ -13,7 +13,7 @@ static std::vector<std::weak_ptr<TimerInterface>> timer_instances(Platform::TIM:
 static std::mutex timer_instances_mutex;
 
 // Constructor with timer type detection
-TimerInterface::TimerInterface(uint8_t instance) 
+TimerInterface::TimerInterface(TimerInstance instance) 
     : initialized(false), 
       timer_instance(instance),
       is_running(false) {
@@ -43,39 +43,26 @@ TimerInterface::~TimerInterface() {
 }
 
 // Safe singleton factory with shared_ptr
-std::shared_ptr<TimerInterface> TimerInterface::GetInstance(uint8_t instance) {
+// Replace the implementation in timer.cpp:
+TimerInterface& TimerInterface::GetInstance(uint8_t instance) {
     if (!Platform::TIM::isValidTimerInstance(instance)) {
-        // Return nullptr for invalid instances instead of defaulting to another timer
-        return nullptr;
+        // Since we can't return nullptr with references, default to timer 1
+        instance = 1;
     }
-    
-    std::lock_guard<std::mutex> lock(timer_instances_mutex);
     
     // Convert to zero-based index
     size_t index = instance - 1;
     
-    // Check if we already have a non-expired weak_ptr
-    auto timer_ptr = timer_instances[index].lock();
-    if (!timer_ptr) {
-        // Create a new instance if none exists or the previous one expired
-        timer_ptr = std::make_shared<TimerInterface>(instance);
-        timer_instances[index] = timer_ptr;
-    }
-    
-    return timer_ptr;
-}
-
-// Release unused timers
-void TimerInterface::ReleaseUnusedTimers() {
     std::lock_guard<std::mutex> lock(timer_instances_mutex);
     
-    for (auto& weak_timer : timer_instances) {
-        if (weak_timer.expired()) {
-            // This is already handled by shared_ptr, just making the expired
-            // state explicit
-            weak_timer.reset();
-        }
-    }
+    // Replace dynamic vector with static array of actual instances
+    static TimerInterface instances[TIM_CHANNEL_COUNT] = {
+        TimerInterface(TimerInstance::TIM1), TimerInterface(TimerInstance::TIM2), TimerInterface(TimerInstance::TIM3),
+        TimerInterface(TimerInstance::TIM4), TimerInterface(TimerInstance::TIM5), TimerInterface(TimerInstance::TIM9),
+        TimerInterface(TimerInstance::TIM10), TimerInterface(TimerInstance::TIM11)
+    };
+    
+    return instances[index];
 }
 
 // Enhanced control method with type-safe command enumeration
@@ -349,7 +336,7 @@ bool TimerInterface::SupportsFeature(TimerFeature feature) const {
             
         case TimerFeature::DMA:
             // All timers except TIM9, TIM10, TIM11 support DMA
-            return timer_instance <= 5;
+            return timer_instance <= TimerInstance::TIM5;
             
         // Check other features...
             

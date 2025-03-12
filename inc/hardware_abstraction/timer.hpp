@@ -110,7 +110,7 @@ private:
     bool initialized;
     
     // Timer instance this interface is controlling
-    uint8_t timer_instance;
+    TimerInstance timer_instance;
     
     // Current configuration
     TimerConfig config;
@@ -143,7 +143,7 @@ private:
     
 public:
     // Constructor with timer type detection
-    explicit TimerInterface(uint8_t instance);
+    explicit TimerInterface(TimerInstance instance);
     
     // Destructor with proper cleanup
     ~TimerInterface() override;
@@ -191,10 +191,8 @@ public:
     TimerType GetTimerType() const;
     
     // Safe singleton factory
-    static std::shared_ptr<TimerInterface> GetInstance(uint8_t instance);
+    static TimerInterface& GetInstance(uint8_t instance);
     
-    // Remove timers that aren't being used
-    static void ReleaseUnusedTimers();
 };
 
 }

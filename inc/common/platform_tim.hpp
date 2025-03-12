@@ -20,7 +20,7 @@ namespace TIM {
     constexpr uint32_t TIM10_BASE = 0x40014400UL; // General-purpose timer
     constexpr uint32_t TIM11_BASE = 0x40014800UL; // General-purpose timer
 
-    enum class TimerInstance {
+    enum class TimerInstance : uint8_t{
         TIM1 = 1,
         TIM2 = 2,
         TIM3 = 3,
@@ -510,16 +510,21 @@ namespace TIM {
     }
     
     // Function to determine timer type from timer instance
-    inline TimerType getTimerType(uint8_t instance) {
-        if (instance == 1) {
-            return TimerType::Advanced;
-        } else if (instance >= 2 && instance <= 5) {
-            return TimerType::GeneralPurpose;
-        } else if (instance >= 9 && instance <= 11) {
-            return TimerType::Basic;
-        } else {
-            // Default to basic timer for unknown instances
-            return TimerType::Basic;
+    inline TimerType getTimerType(TimerInstance instance) {
+        switch (instance) {
+            case TimerInstance::TIM1:
+                return TimerType::Advanced;
+            case TimerInstance::TIM2:
+            case TimerInstance::TIM3:
+            case TimerInstance::TIM4:
+            case TimerInstance::TIM5:
+                return TimerType::GeneralPurpose;
+            case TimerInstance::TIM9:
+            case TimerInstance::TIM10:
+            case TimerInstance::TIM11:
+                return TimerType::Basic;
+            default:
+                return TimerType::Basic;
         }
     }
     
@@ -531,18 +536,20 @@ namespace TIM {
     }
     
     // Function to get number of channels supported by timer instance
-    inline uint8_t getTimerChannelCount(uint8_t instance) {
+    inline uint8_t getTimerChannelCount(TimerInstance instance) {
+
+        
         switch (instance) {
-            case 1:
-            case 2:
-            case 3:
-            case 4:
-            case 5:
+            case TimerInstance ::TIM1:
+            case TimerInstance ::TIM2:  
+            case TimerInstance ::TIM3:
+            case TimerInstance ::TIM4:
+            case TimerInstance ::TIM5:
                 return 4;  // TIM1-TIM5 support 4 channels
-            case 9:
+            case TimerInstance ::TIM9:
                 return 2;  // TIM9 supports 2 channels
-            case 10:
-            case 11:
+            case TimerInstance ::TIM10:
+            case TimerInstance ::TIM11:
                 return 1;  // TIM10, TIM11 support 1 channel
             default:
                 return 0;
@@ -550,8 +557,8 @@ namespace TIM {
     }
     
     // Function to check if timer supports 32-bit counter
-    inline bool hasTimer32BitCounter(uint8_t instance) {
-        return (instance == 2 || instance == 5);  // TIM2 and TIM5 are 32-bit
+    inline bool hasTimer32BitCounter(TimerInstance instance) {
+        return (instance == TimerInstance::TIM2 || instance == TimerInstance::TIM5);  // TIM2 and TIM5 are 32-bit
     }
     
     } // namespace TIM
