@@ -35,15 +35,12 @@ SysTickInterface::~SysTickInterface() {
 }
 
 // Singleton pattern implementation
-std::shared_ptr<SysTickInterface> SysTickInterface::GetInstance() {
-
+static SysTickInterface& GetInstance() {
     std::lock_guard<std::mutex> lock(instance_mutex);
-    
-    if (!systick_instance) {
-        systick_instance = std::shared_ptr<SysTickInterface>(new SysTickInterface());
+    if (systick_instance == nullptr) {
+        systick_instance = std::make_shared<SysTickInterface>();
     }
-
-    return systick_instance;
+    return *systick_instance;
 }
 
 // Initialize SysTick with specific configuration

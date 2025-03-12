@@ -83,7 +83,7 @@ public:
     friend void SysTick_IRQHandler(void);
     
     // Singleton pattern for SysTick interface (only need one instance)
-    static std::shared_ptr<SysTickInterface> GetInstance();
+    static SysTickInterface& GetInstance();
 };
 
 // SysTick control command identifiers

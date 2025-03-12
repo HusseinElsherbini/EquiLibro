@@ -8,6 +8,11 @@
 namespace Platform {
 namespace FLASH {
 
+FlashInterface& GetInstance() {
+    // Static instance of the interface, created on first use
+    static FlashInterfaceImpl instance;
+    return instance;
+}
 // Destructor
 FlashInterfaceImpl::~FlashInterfaceImpl() {
     if (initialized) {
@@ -15,6 +20,7 @@ FlashInterfaceImpl::~FlashInterfaceImpl() {
         Lock();
     }
 }
+
 
 // Initialize the flash interface
 Platform::Status FlashInterfaceImpl::Init(void* config) {

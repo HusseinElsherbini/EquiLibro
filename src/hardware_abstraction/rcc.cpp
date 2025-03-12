@@ -29,13 +29,9 @@ RccInterface::~RccInterface() {
 }
 
 // Singleton instance getter
-std::shared_ptr<RccInterface> RccInterface::GetInstance() {
-
-    std::lock_guard<std::mutex> lock(instance_mutex);
-    if (!rcc_instance) {
-        rcc_instance = std::shared_ptr<RccInterface>(new RccInterface());
-    }
-    return rcc_instance;
+RccInterface& RccInterface::GetInstance() {
+    static RccInterface instance;
+    return instance;
 }
 
 // Create default RCC configuration for the MCU

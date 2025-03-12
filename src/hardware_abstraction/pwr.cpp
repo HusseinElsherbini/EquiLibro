@@ -12,14 +12,12 @@ static std::shared_ptr<PowerInterfaceImpl> power_controller_instance = nullptr;
 static std::mutex instance_mutex;
 
 // Get singleton instance
-std::shared_ptr<PowerInterface> PowerInterface::GetInstance() {
+static PowerInterface& GetInstance(){
     std::lock_guard<std::mutex> lock(instance_mutex);
-    
-    if (!power_controller_instance) {
-        power_controller_instance = std::shared_ptr<PowerInterfaceImpl>(new PowerInterfaceImpl());
+    if (power_controller_instance == nullptr) {
+        power_controller_instance = std::make_shared<PowerInterfaceImpl>();
     }
-    
-    return power_controller_instance;
+    return *power_controller_instance;
 }
 
 // Constructor
@@ -50,10 +48,10 @@ Platform::Status PowerInterfaceImpl::Init(void* config) {
     }
     
     // Enable PWR clock in RCC
-    std::shared_ptr<Platform::RCC::RccInterface> rcc = Platform::RCC::RccInterface::GetInstance();
+    auto& rcc = Platform::RCC::RccInterface::GetInstance();
 
 
-    Platform::Status status = rcc->EnablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
+    Platform::Status status = rcc.EnablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
 
     if (status != Platform::Status::OK) {
         return status;
@@ -144,7 +142,7 @@ Platform::Status PowerInterfaceImpl::DeInit() {
     
     // Reset PWR peripheral
     auto rcc = Platform::RCC::RccInterface::GetInstance();
-    Platform::Status status = rcc->DisablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
+    Platform::Status status = rcc.DisablePeripheralClock(Platform::RCC::RccPeripheral::PWR);
     
     initialized = false;
     return status;

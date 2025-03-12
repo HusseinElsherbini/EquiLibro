@@ -69,7 +69,7 @@ enum class FlashEvent {
 class FlashInterface : public HwInterface {
 public:
     // Get singleton instance
-    static std::shared_ptr<FlashInterface> GetInstance();
+    static FlashInterface& GetInstance();
     
     // Flash-specific methods
     virtual Platform::Status Configure(const FlashConfig& config) = 0;

@@ -86,7 +86,7 @@ enum class PowerEvent {
 class PowerInterface : public HwInterface {
 public:
     // Get singleton instance
-    static std::shared_ptr<PowerInterface> GetInstance();
+    static PowerInterface& GetInstance();
     
     // Power mode control methods
     virtual Platform::Status EnterSleepMode(SleepEntryMode entry_mode) = 0;
@@ -130,7 +130,7 @@ class PowerInterfaceImpl : public PowerInterface {
         PowerConfig config;
     
         // Grant access to the GetInstance method
-        friend std::shared_ptr<PowerInterface> PowerInterface::GetInstance();
+        friend PowerInterface& PowerInterface::GetInstance();
         
         // Mutex for thread safety
         std::mutex power_mutex;

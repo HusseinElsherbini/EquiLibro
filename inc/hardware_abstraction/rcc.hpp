@@ -89,7 +89,7 @@ private:
 public:    
 
     // Singleton pattern for RCC interface (only need one instance)
-    static std::shared_ptr<RccInterface> GetInstance();
+    static RccInterface& GetInstance();
     // Constructor
     RccInterface();
     
