@@ -105,7 +105,7 @@ private:
 public:
     // Get singleton instance
     static SystemTiming& GetInstance();
-    
+    static std::shared_ptr<SystemTiming> GetSharedInstance();
     // MiddlewareModule interface implementation
     Platform::Status Init(void* config) override;
     Platform::Status Process(void* input, void* output) override;
@@ -118,7 +118,7 @@ public:
     void Delay(uint32_t amount, TimeUnit unit = TimeUnit::Milliseconds);
     bool StartTimeout(uint32_t amount, TimeUnit unit = TimeUnit::Milliseconds);
     bool IsTimeoutComplete();
-    
+    bool IsInitialized();
     // High-precision timing functions
     void DelayMicroseconds(uint32_t us);
     void DelayMilliseconds(uint32_t ms);
@@ -144,6 +144,7 @@ public:
     
     // Helper functions for time conversion
     static uint32_t ConvertTime(uint32_t value, TimeUnit from_unit, TimeUnit to_unit);
+    Platform::Status EnsureInitialized();
 };
 
 // Inline function to get system timing instance

@@ -8,6 +8,8 @@
 
 using namespace Platform::TIM;
 
+namespace Platform {
+    namespace TIM {
 /**
  * Possible timer operations that can be performed
  * This replaces arbitrary uint32_t command codes with type-safe enumeration
@@ -195,3 +197,5 @@ public:
     static void ReleaseUnusedTimers();
 };
 
+}
+}

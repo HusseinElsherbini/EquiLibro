@@ -20,6 +20,16 @@ namespace TIM {
     constexpr uint32_t TIM10_BASE = 0x40014400UL; // General-purpose timer
     constexpr uint32_t TIM11_BASE = 0x40014800UL; // General-purpose timer
 
+    enum class TimerInstance {
+        TIM1 = 1,
+        TIM2 = 2,
+        TIM3 = 3,
+        TIM4 = 4,
+        TIM5 = 5,
+        TIM9 = 9,
+        TIM10 = 10,
+        TIM11 = 11
+    };
     struct TimerConfig {
         uint8_t timerInstance;             // Timer instance (1-5)
         Mode mode;                    // Timer operating mode

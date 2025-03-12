@@ -1,9 +1,8 @@
-﻿// hw_interface.hpp
-#ifndef HW_INTERFACE_HPP
-#define HW_INTERFACE_HPP
+﻿#pragma once
 
 #include "platform.hpp"
 
+namespace Platform {
 /**
  * Hardware interface abstract base class that provides a consistent API
  * for interacting with hardware peripherals.
@@ -78,4 +77,4 @@ constexpr uint32_t HW_CTRL_SET_CONFIG = 0x0004;
 constexpr uint32_t HW_CTRL_GET_STATUS = 0x0005;
 constexpr uint32_t HW_CTRL_SET_POWER_MODE = 0x0006;
 
-#endif /* HW_INTERFACE_HPP */
+}

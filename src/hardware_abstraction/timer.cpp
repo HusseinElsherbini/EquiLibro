@@ -6,6 +6,8 @@
 #include <mutex>
 #include <memory>
 
+namespace Platform {
+namespace TIM {
 // Static instance management with shared_ptr
 static std::vector<std::weak_ptr<TimerInterface>> timer_instances(Platform::TIM::TIM_CHANNEL_COUNT);
 static std::mutex timer_instances_mutex;
@@ -354,4 +356,6 @@ bool TimerInterface::SupportsFeature(TimerFeature feature) const {
         default:
             return false;
     }
+}
+}
 }

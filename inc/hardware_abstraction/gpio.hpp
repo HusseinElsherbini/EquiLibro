@@ -1,6 +1,4 @@
-﻿// gpio.hpp
-#ifndef GPIO_HPP
-#define GPIO_HPP
+﻿#pragma once 
 
 #include "hw_interface.hpp"
 #include "common/platform.hpp"
@@ -10,7 +8,8 @@
  * GPIO hardware interface implementation
  * Provides a C++ object-oriented interface to GPIO peripherals
  */
-
+namespace Platform {
+namespace GPIO {
 
 class GpioInterface : public HwInterface {
 private:
@@ -54,4 +53,5 @@ constexpr uint32_t GPIO_CTRL_TOGGLE_PIN = 0x0103;
 constexpr uint32_t GPIO_CTRL_READ_PIN = 0x0104;
 constexpr uint32_t GPIO_CTRL_CONFIG_PIN = 0x0105;
 
-#endif /* GPIO_HPP */
+}
+}

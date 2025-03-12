@@ -33,7 +33,8 @@ enum class Status {
     NO_DATA,             // No data available
     BUFFER_OVERFLOW,     // Buffer overflow
     HARDWARE_ERROR,      // Hardware-specific error
-    COMMUNICATION_ERROR  // Communication error
+    COMMUNICATION_ERROR,  // Communication error
+    DEPENDENCY_NOT_INITIALIZED // Dependency not initialized
 };
 
 // -------------------- Clock Definitions --------------------

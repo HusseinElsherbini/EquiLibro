@@ -4,6 +4,7 @@
 #include "hardware_abstraction/timer.hpp"
 #include "hardware_abstraction/systick.hpp"
 #include "hardware_abstraction/rcc.hpp"
+#include <memory>
 
 #ifdef USE_FREERTOS
 #include "FreeRTOS.h"
@@ -14,10 +15,26 @@ namespace Middleware {
 namespace SystemServices {
 // Static instance for singleton pattern
 SystemTiming& SystemTiming::GetInstance() {
+    
     static SystemTiming instance;
     return instance;
 }
+// Get a shared_ptr to the static instance
+static std::shared_ptr<SystemTiming> GetSharedInstance() {
+    // Get the raw pointer to the static instance
+    SystemTiming* raw_ptr = &SystemTiming::GetInstance();
+    
+    // Create a shared_ptr that doesn't own/delete the static instance
+    // We use a custom deleter that does nothing
+    return std::shared_ptr<SystemTiming>(raw_ptr, [](SystemTiming*) {
+        // Empty deleter - we don't want to delete the static instance
+        // when the shared_ptr is destroyed
+    });
+}
 
+bool SystemTiming::IsInitialized() {
+    return initialized;
+}
 // Constructor
 SystemTiming::SystemTiming()
     : initialized(false),

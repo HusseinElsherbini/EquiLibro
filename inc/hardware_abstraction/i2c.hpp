@@ -9,6 +9,8 @@
 #include <vector>
 #include <memory>
 
+namespace Platform {
+    namespace I2C {
 /**
  * I2C transfer request structure
  * Contains all parameters needed for an I2C transfer operation
@@ -92,6 +94,7 @@ private:
     uint8_t instance;
     I2CConfig config;
     
+    Middleware::SystemServices::SystemTiming& timing_service;
 
     struct TransferState {
         bool in_progress;
@@ -107,7 +110,7 @@ private:
         uint8_t* data_buffer;
         uint16_t data_size;
         uint32_t timeout_ms;
-        uint32_t start_time;    // For timeout tracking in interrupts
+        uint64_t start_time;    // For timeout tracking in interrupts
         
         // For FreeRTOS task notification
         void* notify_task;
@@ -154,6 +157,7 @@ private:
     // Static array of instances
     static std::vector<std::weak_ptr<I2CInterface>> instances;
     static std::mutex instances_mutex;
+
     
 public:
     // Destructor
@@ -213,3 +217,5 @@ constexpr uint32_t I2C_CTRL_SET_ADDRESSING_MODE = 0x0310;
 constexpr uint32_t I2C_CTRL_SET_CONFIG = 0x0311;
 constexpr uint32_t I2C_CTRL_GET_STATUS = 0x0312;
 constexpr uint32_t I2C_CTRL_GET_LAST_ERROR = 0x0313;
+}
+}

@@ -3,9 +3,12 @@
 #include "hardware_abstraction/i2c.hpp"
 #include "hardware_abstraction/gpio.hpp"
 #include "hardware_abstraction/rcc.hpp"
-#include "system_services/delay.h"
+#include "system_services/system_timing.hpp"
+#include "common/platform_cmsis.hpp"
 #include <algorithm>
 
+namespace Platform {
+namespace I2C {
 // Static array of instances (initialized to empty)
 std::vector<std::weak_ptr<I2CInterface>> I2CInterface::instances(3);
 std::mutex I2CInterface::instances_mutex;
@@ -13,16 +16,17 @@ std::mutex I2CInterface::instances_mutex;
 // Constructor
 I2CInterface::I2CInterface(uint8_t instance) 
     : initialized(false), 
-      instance(instance) {
+      instance(instance),
+      timing_service(Middleware::SystemServices::SystemTiming::GetInstance()){
     
     // Initialize transfer state
     transfer_state.in_progress = false;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     transfer_state.data_index = 0;
     transfer_state.last_error = I2CError::None;
     transfer_state.repeated_start = false;
     transfer_state.notify_task = nullptr;
-    
+ 
     // Initialize callbacks
     for (auto& callback : callbacks) {
         callback.callback = nullptr;
@@ -44,7 +48,7 @@ std::shared_ptr<I2CInterface> I2CInterface::GetInstance(uint8_t instance) {
     if (instance < 1 || instance > 3) {
         return nullptr;
     }
-    
+
     std::lock_guard<std::mutex> lock(instances_mutex);
     
     // Convert to zero-based index
@@ -69,7 +73,7 @@ Platform::I2C::Registers* I2CInterface::GetI2CRegisters() const {
 // Configure GPIO pins for I2C
 Platform::Status I2CInterface::ConfigurePins() {
     // Get GPIO interface
-    auto& gpio = GpioInterface::GetInstance();
+    auto& gpio = Platform::GPIO::GpioInterface::GetInstance();
     
     // Define the I2C pin mapping structure
     struct I2CPinMapping {
@@ -148,10 +152,10 @@ Platform::Status I2CInterface::CalculateTimingParameters() {
     }
     
     // Get RCC interface to determine peripheral clock frequency
-    auto rcc = RccInterface::GetInstance();
+    auto rcc = Platform::RCC::RccInterface::GetInstance();
     
     // Determine peripheral clock frequency
-    uint32_t pclk1_freq = rcc.GetApb1ClockFrequency();
+    uint32_t pclk1_freq = rcc->GetApb1ClockFrequency();
     
     // Set peripheral clock frequency in CR2
     uint32_t cr2 = i2c->CR2;
@@ -207,6 +211,10 @@ Platform::Status I2CInterface::CalculateTimingParameters() {
 
 // Initialize I2C interface
 Platform::Status I2CInterface::Init(void* config) {
+
+    if (!timing_service.initialized) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
     // Check if already initialized
     if (initialized) {
         return Platform::Status::OK; // Already initialized
@@ -221,7 +229,7 @@ Platform::Status I2CInterface::Init(void* config) {
     this->config = *static_cast<I2CConfig*>(config);
     
     // Enable I2C peripheral clock
-    auto& rcc = RccInterface::GetInstance();
+    auto rcc = Platform::RCC::RccInterface::GetInstance();
     Platform::RCC::RccPeripheral i2c_clock;
     
     switch (instance) {
@@ -239,7 +247,7 @@ Platform::Status I2CInterface::Init(void* config) {
     }
     
     // Enable peripheral clock
-    Platform::Status status = rcc.EnablePeripheralClock(i2c_clock);
+    Platform::Status status = rcc->EnablePeripheralClock(i2c_clock);
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -269,12 +277,10 @@ Platform::Status I2CInterface::Init(void* config) {
     // Configure addressing mode and own address
     if (this->config.addressing_mode == Platform::I2C::AddrMode::Addr7Bit) {
         // 7-bit addressing mode
-        i2c->OAR1 = (this->config.own_address << 1) | 0x4000; // Bit 14 must be set
+        i2c->OAR1 = (this->config.own_address << 1); // Shift address to bits 7:1
     } else {
         // 10-bit addressing mode
-        i2c->OAR1 = this->config.own_address | 
-                    Platform::I2C::getBitValue(Platform::I2C::CR1::ADDMODE) | 
-                    0x4000; // Bit 14 must be set
+        i2c->OAR1 = this->config.own_address | (1 << 15); // Set ADDMODE bit (bit 15)
     }
     
     // Configure interrupts if enabled
@@ -375,7 +381,7 @@ Platform::Status I2CInterface::DeInit() {
     }
     
     // Disable I2C peripheral clock
-    auto& rcc = RccInterface::GetInstance();
+    auto rcc = Platform::RCC::RccInterface::GetInstance();
     Platform::RCC::RccPeripheral i2c_clock;
     
     switch (instance) {
@@ -393,7 +399,7 @@ Platform::Status I2CInterface::DeInit() {
     }
     
     // Disable peripheral clock
-    Platform::Status status = rcc.DisablePeripheralClock(i2c_clock);
+    Platform::Status status = rcc->DisablePeripheralClock(i2c_clock);
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -401,7 +407,7 @@ Platform::Status I2CInterface::DeInit() {
     // Reset internal state
     initialized = false;
     transfer_state.in_progress = false;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     
     return Platform::Status::OK;
 }
@@ -591,33 +597,38 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     }
     
     // Wait until bus is free
-    uint32_t start_time = Delay_GetTimestamp() / 1000; // Convert to ms
+
+    uint64_t start_time = timing_service.GetMilliseconds();
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if ((Delay_GetTimestamp() / 1000) - start_time > timeout) {
+        if (timing_service.GetMilliseconds() - start_time > timeout) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
     
     // Update transfer state
     transfer_state.in_progress = true;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     transfer_state.data_index = 0;
     transfer_state.last_error = I2CError::None;
 
+    bool non_blocking = (timeout == 0);
+
     // For non-blocking operations, we'll use interrupts if they're enabled
     if (non_blocking && config.enable_interrupts) {
+
         // Wait until bus is free (this part is still blocking)
-        uint32_t start_time = Delay_GetTimestamp() / 1000;
+        uint64_t start_time = timing_service.GetMilliseconds();
+
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            Delay_Microseconds(10, true);
+            timing_service.DelayMicroseconds(10);
             
             // Check for timeout with a reasonable default
-            if ((Delay_GetTimestamp() / 1000) - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -652,7 +663,7 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     
     // 3. Send slave address with write bit (LSB = 0)
     i2c->DR = (dev_addr << 1) & 0xFE;
-    transfer_state.state = Platform::I2C::TransferState::AddrSentW;
+    transfer_state.state = CurrentTransferState::AddrSentW;
     
     // 4. Wait for address to be sent (ADDR flag)
     if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR), true, timeout) != Platform::Status::OK) {
@@ -678,7 +689,7 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     (void)i2c->SR2;
     
     // 6. Send all data bytes
-    transfer_state.state = Platform::I2C::TransferState::Writing;
+    transfer_state.state = CurrentTransferState::Writing;
     for (uint16_t i = 0; i < size; i++) {
         // Wait for TXE flag (transmit buffer empty)
         if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::TXE), true, timeout) != Platform::Status::OK) {
@@ -715,22 +726,21 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::STOP);
     
     // 9. Wait for STOP bit to be cleared
-    start_time = Delay_GetTimestamp() / 1000;
+    start_time = timing_service.GetMilliseconds();
     while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
         // Check for timeout
-        if ((Delay_GetTimestamp() / 1000) - start_time > timeout) {
+        if (timing_service.GetMilliseconds() - start_time > timeout) {
             transfer_state.in_progress = false;
             transfer_state.last_error = I2CError::Timeout;
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
-    
     // Reset transfer state
     transfer_state.in_progress = false;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     
     // Call completion callback if registered
     if (callbacks[static_cast<uint32_t>(I2CEvent::TransferComplete)].enabled) {
@@ -769,36 +779,38 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
     }
     
     // Wait until bus is free
-    uint32_t start_time = Delay_GetTimestamp() / 1000; // Convert to ms
+    uint64_t start_time = timing_service.GetMilliseconds(); // Convert to ms
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if ((Delay_GetTimestamp() / 1000) - start_time > timeout) {
+        if (timing_service.GetMilliseconds() - start_time > timeout) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
-    
+
     // Enable acknowledgement
     i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::ACK);
     
     // Update transfer state
     transfer_state.in_progress = true;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     transfer_state.data_index = 0;
     transfer_state.last_error = I2CError::None;
     
+    bool non_blocking = (timeout == 0);
+
     // For non-blocking operations, we'll use interrupts if they're enabled
     if (non_blocking && config.enable_interrupts) {
         // Wait until bus is free (this part is still blocking)
-        uint32_t start_time = Delay_GetTimestamp() / 1000;
+        uint64_t start_time = timing_service.GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            Delay_Microseconds(10, true);
+            timing_service.DelayMicroseconds(10);
             
             // Check for timeout with a reasonable default
-            if ((Delay_GetTimestamp() / 1000) - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -833,7 +845,7 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
     
     // 3. Send slave address with read bit (LSB = 1)
     i2c->DR = (dev_addr << 1) | 0x01;
-    transfer_state.state = Platform::I2C::TransferState::AddrSentR;
+    transfer_state.state = CurrentTransferState::AddrSentR;
     
     // 4. Wait for address to be sent (ADDR flag)
     if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR), true, timeout) != Platform::Status::OK) {
@@ -903,7 +915,7 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
         
     } else {
         // More than 2 bytes
-        transfer_state.state = Platform::I2C::TransferState::Reading;
+        transfer_state.state = CurrentTransferState::Reading;
         
         // Read bytes until the last 3
         for (uint16_t i = 0; i < size - 3; i++) {
@@ -962,22 +974,22 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
     i2c->CR1 &= ~Platform::I2C::getBitValue(Platform::I2C::CR1::POS);
     
     // Wait for STOP bit to be cleared
-    start_time = Delay_GetTimestamp() / 1000;
+    start_time = timing_service.GetMilliseconds();
     while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
         // Check for timeout
-        if ((Delay_GetTimestamp() / 1000) - start_time > timeout) {
+        if (timing_service.GetMilliseconds() - start_time > timeout) {
             transfer_state.in_progress = false;
             transfer_state.last_error = I2CError::Timeout;
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
     
     // Reset transfer state
     transfer_state.in_progress = false;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     
     // Call completion callback if registered
     if (callbacks[static_cast<uint32_t>(I2CEvent::TransferComplete)].enabled) {
@@ -1017,20 +1029,22 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     }
     
     // Wait until bus is free
-    uint32_t start_time = Delay_GetTimestamp() / 1000; // Convert to ms
+    uint64_t start_time = timing_service.GetMilliseconds(); 
+
+
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if ((Delay_GetTimestamp() / 1000) - start_time > timeout) {
+        if (timing_service.GetMilliseconds() - start_time > timeout) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
     
     // Update transfer state
     transfer_state.in_progress = true;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     transfer_state.data_index = 0;
     transfer_state.last_error = I2CError::None;
     
@@ -1038,15 +1052,16 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     bool non_blocking = (timeout == 0);
 
     // For non-blocking operations, we'll use interrupts if they're enabled
+
     if (non_blocking && config.enable_interrupts) {
         // Wait until bus is free (this part is still blocking)
-        uint32_t start_time = Delay_GetTimestamp() / 1000;
+        uint64_t start_time = timing_service.GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            Delay_Microseconds(10, true);
+            timing_service.DelayMicroseconds(10);
             
             // Check for timeout with a reasonable default
-            if ((Delay_GetTimestamp() / 1000) - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -1081,7 +1096,7 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     
     // 3. Send slave address with write bit (LSB = 0)
     i2c->DR = (dev_addr << 1) & 0xFE;
-    transfer_state.state = Platform::I2C::TransferState::AddrSentW;
+    transfer_state.state = CurrentTransferState::AddrSentW;
     
     // 4. Wait for address to be sent (ADDR flag)
     if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR), true, timeout) != Platform::Status::OK) {
@@ -1143,7 +1158,7 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     }
     
     // 8. Send data bytes
-    transfer_state.state = Platform::I2C::TransferState::Writing;
+    transfer_state.state = CurrentTransferState::Writing;
     for (uint16_t i = 0; i < size; i++) {
         // Wait for TXE flag
         if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::TXE), true, timeout) != Platform::Status::OK) {
@@ -1181,7 +1196,7 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     
     // Reset transfer state
     transfer_state.in_progress = false;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     
     // Call completion callback if registered
     if (callbacks[static_cast<uint32_t>(I2CEvent::TransferComplete)].enabled) {
@@ -1221,7 +1236,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     
     // Set up the transfer state
     transfer_state.in_progress = true;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     transfer_state.data_index = 0;
     transfer_state.last_error = I2CError::None;
     transfer_state.repeated_start = true;
@@ -1233,7 +1248,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     transfer_state.data_buffer = data;
     transfer_state.data_size = size;
     transfer_state.timeout_ms = timeout;
-    transfer_state.start_time = Delay_GetTimestamp() / 1000; // For timeout tracking
+    transfer_state.start_time = timing_service.GetMilliseconds(); // For timeout tracking
     
     // Check if this is a non-blocking operation (timeout == 0)
     bool non_blocking = (timeout == 0);
@@ -1242,13 +1257,13 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     if (non_blocking && config.enable_interrupts) {
         // Wait until bus is free (this part is still blocking)
         // We could make this part non-blocking too with more state machine complexity
-        uint32_t start_time = Delay_GetTimestamp() / 1000;
+        uint64_t start_time = timing_service.GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            Delay_Microseconds(10, true);
+            timing_service.DelayMicroseconds(10, true);
             
             // Check for timeout with a reasonable default
-            if ((Delay_GetTimestamp() / 1000) - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -1273,17 +1288,17 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     // For blocking operations, use the polling approach
     
     // Wait until bus is free
-    uint32_t start_time = Delay_GetTimestamp() / 1000;
+    uint64_t start_time = timing_service.GetMilliseconds();
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if ((Delay_GetTimestamp() / 1000) - start_time > timeout) {
+        if (timing_service.GetMilliseconds() - start_time > timeout) {
             transfer_state.in_progress = false;
             transfer_state.last_error = I2CError::Timeout;
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
     
     // Enable acknowledgement
@@ -1303,7 +1318,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     
     // 3. Send slave address with write bit (LSB = 0)
     i2c->DR = (dev_addr << 1) & 0xFE;
-    transfer_state.state = Platform::I2C::TransferState::AddrSentW;
+    transfer_state.state = CurrentTransferState::AddrSentW;
     
     // 4. Wait for address to be sent (ADDR flag)
     if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR), true, timeout) != Platform::Status::OK) {
@@ -1329,7 +1344,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     (void)i2c->SR2;
     
     // 6. Send memory address (1 or 2 bytes)
-    transfer_state.state = Platform::I2C::TransferState::RegAddrSent;
+    transfer_state.state = CurrentTransferState::RegAddrSent;
     if (mem_addr_size == 1) {
         // 8-bit memory address
         if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::TXE), true, timeout) != Platform::Status::OK) {
@@ -1369,7 +1384,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     
     // 8. Send repeated START condition
     i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::START);
-    transfer_state.state = Platform::I2C::TransferState::RepeatedStartSent;
+    transfer_state.state = CurrentTransferState::RepeatedStartSent;
     
     // 9. Wait for START to be generated (SB flag)
     if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::SB), true, timeout) != Platform::Status::OK) {
@@ -1380,7 +1395,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     
     // 10. Send slave address with read bit (LSB = 1)
     i2c->DR = (dev_addr << 1) | 0x01;
-    transfer_state.state = Platform::I2C::TransferState::AddrSentR;
+    transfer_state.state = CurrentTransferState::AddrSentR;
     
     // 11. Wait for address to be sent (ADDR flag)
     if (PollForStatus(Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR), true, timeout) != Platform::Status::OK) {
@@ -1454,7 +1469,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
         
     } else {
         // More than 2 bytes
-        transfer_state.state = Platform::I2C::TransferState::Reading;
+        transfer_state.state = CurrentTransferState::Reading;
         
         // Clear ADDR flag by reading SR1 and SR2
         (void)i2c->SR1;
@@ -1511,7 +1526,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     
     // Reset transfer state
     transfer_state.in_progress = false;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     transfer_state.repeated_start = false;
     
     // Call completion callback if registered
@@ -1545,25 +1560,25 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
     }
     
     // Set timeout timestamp
-    uint32_t start_time = Delay_GetTimestamp() / 1000;
+    uint64_t start_time = timing_service.GetMilliseconds();
     uint32_t end_time = start_time + timeout;
     
     // Try for the number of trials
     while (trials > 0) {
         // Check timeout
-        if ((Delay_GetTimestamp() / 1000) >= end_time) {
+        if (timing_service.GetMilliseconds() >= end_time) {
             return Platform::Status::TIMEOUT;
         }
         
         // Wait until bus is free
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Check for timeout
-            if ((Delay_GetTimestamp() / 1000) >= end_time) {
+            if (timing_service.GetMilliseconds() >= end_time) {
                 return Platform::Status::TIMEOUT;
             }
             
             // Short delay to prevent tight polling
-            Delay_Microseconds(10, true);
+            timing_service.DelayMicroseconds(10, true);
         }
         
         // Send START condition
@@ -1572,7 +1587,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
         // Wait for START to be generated (SB flag)
         while (!(i2c->SR1 & Platform::I2C::getBitValue(Platform::I2C::SR1::SB))) {
             // Check for timeout
-            if ((Delay_GetTimestamp() / 1000) >= end_time) {
+            if (timing_service.GetMilliseconds() >= end_time) {
                 return Platform::Status::TIMEOUT;
             }
         }
@@ -1584,7 +1599,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
         while (!(i2c->SR1 & (Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR) | 
                              Platform::I2C::getBitValue(Platform::I2C::SR1::AF)))) {
             // Check for timeout
-            if ((Delay_GetTimestamp() / 1000) >= end_time) {
+            if (timing_service.GetMilliseconds() >= end_time) {
                 // Generate STOP condition
                 i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::STOP);
                 return Platform::Status::TIMEOUT;
@@ -1603,7 +1618,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
             // Wait for STOP bit to be cleared
             while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
                 // Check for timeout
-                if ((Delay_GetTimestamp() / 1000) >= end_time) {
+                if (timing_service.GetMilliseconds() >= end_time) {
                     return Platform::Status::TIMEOUT;
                 }
             }
@@ -1621,7 +1636,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
             // Wait for STOP bit to be cleared
             while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
                 // Check for timeout
-                if ((Delay_GetTimestamp() / 1000) >= end_time) {
+                if (timing_service.GetMilliseconds() >= end_time) {
                     return Platform::Status::TIMEOUT;
                 }
             }
@@ -1630,7 +1645,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
             trials--;
             
             // Short delay between trials
-            Delay_Milliseconds(10, true);
+            timing_service.DelayMilliseconds(10, true);
         }
     }
     
@@ -1646,7 +1661,7 @@ Platform::Status I2CInterface::RecoverBus() {
     }
     
     // Get the GPIO interface
-    auto& gpio = GpioInterface::GetInstance();
+    auto& gpio = Platform::GPIO::GpioInterface::GetInstance();
     
     // Define the I2C pin mapping structure
     struct I2CPinMapping {
@@ -1720,32 +1735,32 @@ Platform::Status I2CInterface::RecoverBus() {
     // Set both lines high
     gpio.SetPin(scl_config.port, scl_config.pin);
     gpio.SetPin(sda_config.port, sda_config.pin);
-    Delay_Microseconds(10, true);
+    timing_service.DelayMicroseconds(10);
     
     // Generate clock pulses to make slave release SDA line
     // Slave devices should release SDA after at most 9 clock cycles
     for (int i = 0; i < 9; i++) {
         // Pull SCL low
         gpio.ResetPin(scl_config.port, scl_config.pin);
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
         
         // Pull SCL high
         gpio.SetPin(scl_config.port, scl_config.pin);
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
     
     // Generate a STOP condition (SDA low to high while SCL is high)
     // First, ensure SCL is high
     gpio.SetPin(scl_config.port, scl_config.pin);
-    Delay_Microseconds(10, true);
+    timing_service.DelayMicroseconds(10);
     
     // Pull SDA low
     gpio.ResetPin(sda_config.port, sda_config.pin);
-    Delay_Microseconds(10, true);
+    timing_service.DelayMicroseconds(10);
     
     // Pull SDA high while SCL is high (STOP condition)
     gpio.SetPin(sda_config.port, sda_config.pin);
-    Delay_Microseconds(10, true);
+    timing_service.DelayMicroseconds(10);
     
     // Reconfigure the pins for I2C mode
     scl_config.mode = Platform::GPIO::Mode::AlternateFunction;
@@ -1769,7 +1784,7 @@ Platform::Status I2CInterface::PollForStatus(uint32_t status_bit, bool set_state
         return Platform::Status::ERROR;
     }
     
-    uint32_t start_time = Delay_GetTimestamp() / 1000; // Convert to ms
+    uint64_t start_time = timing_service.GetMilliseconds(); // Convert to ms
     
     while (true) {
         // Check if the status bit is in the desired state
@@ -1779,12 +1794,12 @@ Platform::Status I2CInterface::PollForStatus(uint32_t status_bit, bool set_state
         }
         
         // Check for timeout
-        if ((Delay_GetTimestamp() / 1000) - start_time > timeout_ms) {
+        if (timing_service.GetMilliseconds() - start_time > timeout_ms) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        Delay_Microseconds(10, true);
+        timing_service.DelayMicroseconds(10);
     }
 }
 
@@ -1795,7 +1810,7 @@ void I2CInterface::HandleError(I2CError error) {
     
     // Reset transfer state
     transfer_state.in_progress = false;
-    transfer_state.state = Platform::I2C::TransferState::Idle;
+    transfer_state.state = CurrentTransferState::Idle;
     
     // Call error callback if registered
     if (callbacks[static_cast<uint32_t>(I2CEvent::TransferError)].enabled) {
@@ -1863,6 +1878,7 @@ extern "C" void I2C2_ER_IRQHandler() {
 }
 
 extern "C" void I2C3_ER_IRQHandler() {
+
     // Get I2C instance
     auto i2c_interface = I2CInterface::GetInstance(3);
     if (!i2c_interface || !i2c_interface->initialized) {
@@ -1871,4 +1887,7 @@ extern "C" void I2C3_ER_IRQHandler() {
     
     // Forward to the instance's error handler
     // Implement the error handling logic here if needed
+}
+
+}
 }

@@ -243,6 +243,7 @@ class SystemInitImpl : public SystemInit {
         
         Platform::Status ReadSystemRegister(uint32_t reg_addr, uint32_t& value) const override;
         Platform::Status WriteSystemRegister(uint32_t reg_addr, uint32_t value) override;
+
     };
 } // namespace Middleware
 } // namespace SystemServices

@@ -5,6 +5,8 @@
 #include <memory>
 #include <mutex>
 
+namespace Platform {
+namespace GPIO {
 // Constructor
 GpioInterface::GpioInterface() : initialized(false) {
     // Nothing else to initialize here
@@ -262,4 +264,6 @@ Platform::Status GpioInterface::ReadPin(Platform::GPIO::Port port, uint8_t pin, 
 
 Platform::Status GpioInterface::ConfigurePin(const Platform::GPIO::GpioConfig& config) {
     return ConfigPin(config);
+}
+}
 }
