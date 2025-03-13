@@ -41,7 +41,10 @@ enum class FlashLatency {
     WS5 = 5,    // Five wait states
     AUTOCALCULATE = 0xFF // Special value for auto-calculate
 };
-
+struct FindSectorParams {
+    uint32_t address;
+    uint8_t sector;
+};
 /**
  * @brief Flash sector information structure
  */
@@ -101,6 +104,7 @@ constexpr uint32_t FLASH_CTRL_IS_BUSY = 0x070A;
 constexpr uint32_t FLASH_CTRL_IS_LOCKED = 0x070B;
 constexpr uint32_t FLASH_CTRL_LOCK = 0x070C;
 constexpr uint32_t FLASH_CTRL_UNLOCK = 0x070D;
+constexpr uint32_t FLASH_CTRL_FIND_SECTOR = 0x070E;
 
 /**
  * @brief Private implementation of FlashInterface

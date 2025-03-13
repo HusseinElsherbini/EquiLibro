@@ -107,7 +107,19 @@ Platform::Status FlashInterfaceImpl::Control(uint32_t command, void* param) {
             WriteParams* write_params = static_cast<WriteParams*>(param);
             return WriteData(write_params->address, write_params->data, write_params->size);
         }
-        
+        case FLASH_CTRL_FIND_SECTOR:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            FindSectorParams* find_params = static_cast<FindSectorParams*>(param);
+
+            find_params->sector = FindSectorNumber(find_params->address);
+
+            if(find_params->sector == 0xFF) {
+                return Platform::Status::ERROR;
+            }
+            return Platform::Status::OK;
+
         case FLASH_CTRL_ERASE_SECTOR: {
             if (param == nullptr) {
                 return Platform::Status::INVALID_PARAM;
