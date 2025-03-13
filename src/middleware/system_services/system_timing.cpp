@@ -41,7 +41,8 @@ SystemTiming::SystemTiming()
       microsecond_counter(0),
       last_timer_count(0),
       timer_wrapped(false),
-      next_timer_id(1) {
+      next_timer_id(1),
+      precision_timer(nullptr) {
     
     // Initialize delay state
     delay_state.in_progress = false;
@@ -70,10 +71,7 @@ Platform::Status SystemTiming::Init(void* config) {
     
     // Get a timer for high-precision timing
     // TIM2 or TIM5 are 32-bit timers which are ideal for this purpose
-    precision_timer = TimerInterface::GetInstance(this->config.high_precision_timer);
-    if (!precision_timer) {
-        return Platform::Status::ERROR;
-    }
+    precision_timer = &TimerInterface::GetInstance(this->config.high_precision_timer);
     
     // Configure the timer for microsecond precision
     TimerConfig timer_config = {};

@@ -67,7 +67,7 @@ private:
     SystemTimingConfig config;
     
     // Hardware timer interface for precise timing
-    std::shared_ptr<TimerInterface> precision_timer;
+    Platform::TIM::TimerInterface* precision_timer;
     
     // Timer scaling and conversion factors
     uint32_t us_per_tick;

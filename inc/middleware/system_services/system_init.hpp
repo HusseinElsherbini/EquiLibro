@@ -185,10 +185,10 @@ class SystemInitImpl : public SystemInit {
         } system_state;
         
         // Hardware interface references
-        std::shared_ptr<Platform::FLASH::FlashInterface> flash_interface;
-        std::shared_ptr<Platform::PWR::PowerInterface> power_interface;
-        std::shared_ptr<Platform::RCC::RccInterface> rcc_interface;
-        std::shared_ptr<Platform::CMSIS::SysTick::SysTickInterface> systick_interface;
+        Platform::FLASH::FlashInterface* flash_interface;
+        Platform::PWR::PowerInterface* power_interface;
+        Platform::RCC::RccInterface* rcc_interface;
+        Platform::CMSIS::SysTick::SysTickInterface* systick_interface;
         
         // Registered callbacks
         struct CallbackEntry {

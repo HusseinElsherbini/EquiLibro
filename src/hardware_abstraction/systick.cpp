@@ -8,10 +8,6 @@ namespace Platform {
 namespace CMSIS {
 namespace SysTick {
 
-// Static instance for singleton pattern
-std::shared_ptr<SysTickInterface> systick_instance = nullptr;
-std::mutex instance_mutex;
-
 
 // Constructor
 SysTickInterface::SysTickInterface() 
@@ -36,11 +32,11 @@ SysTickInterface::~SysTickInterface() {
 
 // Singleton pattern implementation
 static SysTickInterface& GetInstance() {
-    std::lock_guard<std::mutex> lock(instance_mutex);
-    if (systick_instance == nullptr) {
-        systick_instance = std::make_shared<SysTickInterface>();
-    }
-    return *systick_instance;
+
+    static SysTickInterface systick_instance;
+    return  systick_instance;
+
+
 }
 
 // Initialize SysTick with specific configuration
@@ -275,19 +271,18 @@ bool SysTickInterface::HasTimeoutOccurred(uint64_t timeout) const {
 // This should be called from the SysTick_Handler() in startup code
 extern "C" void SysTick_IRQHandler(void) {
     // Get the singleton instance safely
-    auto instance = systick_instance;
-    
+    auto systick_instance = &SysTickInterface::GetInstance();    
     // Check if the instance exists and is valid before using it
-    if (instance) {
+    if (systick_instance) {
         // Increment tick count - access through the shared_ptr
-        instance->tick_count.fetch_add(1, std::memory_order_relaxed); // atomic increment
+        systick_instance->tick_count.fetch_add(1, std::memory_order_relaxed); // atomic increment
         
         // Check if callbacks array is initialized and the specific callback exists
         if (static_cast<uint32_t>(SysTickCallbackType::Tick) < 
             static_cast<uint32_t>(SysTickCallbackType::Max)) {
             
             // Get the callback entry safely
-            auto& callback = instance->callbacks[static_cast<uint32_t>(SysTickCallbackType::Tick)];
+            auto& callback = systick_instance->callbacks[static_cast<uint32_t>(SysTickCallbackType::Tick)];
             
             // Call the callback if it's registered
             if (callback.callback != nullptr) {

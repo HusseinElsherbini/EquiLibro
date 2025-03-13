@@ -49,20 +49,10 @@ private:
     
     CallbackEntry callbacks[static_cast<uint32_t>(SysTickCallbackType::Max)];
 
-    // Private constructor for singleton pattern
-    SysTickInterface();
-
-    static std::shared_ptr<SysTickInterface> systick_instance;
-    static std::mutex instance_mutex;    
-    // Deleted copy constructor and assignment operator
-    SysTickInterface(const SysTickInterface&) = delete;
+    // Deleted assignment operator
     SysTickInterface& operator=(const SysTickInterface&) = delete;
     
 public:
-    // Destructor
-    ~SysTickInterface() override;
-    
-
 
     // Interface implementation
     Status Init(void* config) override;

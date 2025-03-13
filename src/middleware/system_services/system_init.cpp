@@ -156,22 +156,22 @@ Platform::Status SystemInitImpl::Init(void* config) {
         this->config = *static_cast<SystemInitConfig*>(config);
     }
         // Acquire hardware interfaces
-    rcc_interface = Platform::RCC::RccInterface::GetInstance();
+    rcc_interface = &Platform::RCC::RccInterface::GetInstance();
     if (!rcc_interface) {
         return Platform::Status::ERROR;
     }
     
-    power_interface = Platform::PWR::PowerInterface::GetInstance();
+    power_interface = &Platform::PWR::PowerInterface::GetInstance();
     if (!power_interface) {
         return Platform::Status::ERROR;
     }
     
-    flash_interface = Platform::FLASH::FlashInterface::GetInstance();
+    flash_interface = &Platform::FLASH::FlashInterface::GetInstance();
     if (!flash_interface) {
         return Platform::Status::ERROR;
     }
     
-    systick_interface = Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
+    systick_interface = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
     if (!systick_interface) {
         return Platform::Status::ERROR;
     }
@@ -822,7 +822,7 @@ Platform::Status SystemInitImpl::ConfigureSysTick(uint32_t interval_us) {
         return Platform::Status::ERROR;
     }
     // Get SysTick interface
-    systick_interface = Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
+    systick_interface = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
     
     // Calculate reload value based on system clock and desired interval
     uint32_t reload_value = (system_state.system_clock_freq / 1000000) * interval_us;
