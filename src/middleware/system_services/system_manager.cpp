@@ -1,6 +1,6 @@
 ﻿// src/middleware/system_init.cpp
 
-#include "system_services/system_init.hpp"
+#include "system_services/system_manager.hpp"
 #include "hardware_abstraction/rcc.hpp"
 #include "hardware_abstraction/systick.hpp"
 #include "hardware_abstraction/gpio.hpp"
@@ -14,13 +14,13 @@
 namespace Middleware {
 namespace SystemServices {
 // Static instance for singleton pattern
-SystemInit& SystemInit::GetInstance() {
-    static SystemInitImpl instance;
+SystemManager& SystemManager::GetInstance() {
+    static SystemManagerImpl instance;
     return instance;
 }
 
 // Default configuration preset
-SystemInitConfig SystemInit::GetDefaultConfig() {
+SystemInitConfig SystemManager::GetDefaultConfig() {
     SystemInitConfig config = {};
     
     // STM32F401 defaults
@@ -59,7 +59,7 @@ SystemInitConfig SystemInit::GetDefaultConfig() {
 }
 
 // Low power configuration preset
-SystemInitConfig SystemInit::GetLowPowerConfig() {
+SystemInitConfig SystemManager::GetLowPowerConfig() {
 
     SystemInitConfig config = GetDefaultConfig();
     
@@ -85,7 +85,7 @@ SystemInitConfig SystemInit::GetLowPowerConfig() {
 }
 
 // Maximum performance configuration preset
-SystemInitConfig SystemInit::GetMaxPerformanceConfig() {
+SystemInitConfig SystemManager::GetMaxPerformanceConfig() {
 
     SystemInitConfig config = GetDefaultConfig();
     
@@ -108,7 +108,7 @@ SystemInitConfig SystemInit::GetMaxPerformanceConfig() {
 }
 
 // Constructor
-SystemInitImpl::SystemInitImpl()
+SystemManagerImpl::SystemManagerImpl()
     : initialized(false) {
     
     // Initialize state tracking
@@ -136,14 +136,14 @@ SystemInitImpl::SystemInitImpl()
 }
 
 // Destructor
-SystemInitImpl::~SystemInitImpl() {
+SystemManagerImpl::~SystemManagerImpl() {
     if (initialized) {
         // No specific cleanup needed
     }
 }
 
 // Initialize the system
-Platform::Status SystemInitImpl::Init(void* config) {
+Platform::Status SystemManagerImpl::Init(void* config) {
     if (initialized) {
         return Platform::Status::OK; // Already initialized
     }
@@ -239,7 +239,7 @@ Platform::Status SystemInitImpl::Init(void* config) {
 }
 
 // Process function - for periodic tasks
-Platform::Status SystemInitImpl::Process(void* input, void* output) {
+Platform::Status SystemManagerImpl::Process(void* input, void* output) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -249,7 +249,7 @@ Platform::Status SystemInitImpl::Process(void* input, void* output) {
 }
 
 // Configure system parameters
-Platform::Status SystemInitImpl::Configure(uint32_t param_id, void* value) {
+Platform::Status SystemManagerImpl::Configure(uint32_t param_id, void* value) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -297,7 +297,7 @@ Platform::Status SystemInitImpl::Configure(uint32_t param_id, void* value) {
 }
 
 // Get system information
-Platform::Status SystemInitImpl::GetInfo(uint32_t info_id, void* buffer, uint32_t* size) {
+Platform::Status SystemManagerImpl::GetInfo(uint32_t info_id, void* buffer, uint32_t* size) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -389,7 +389,7 @@ Platform::Status SystemInitImpl::GetInfo(uint32_t info_id, void* buffer, uint32_
 }
 
 // Reset the system
-Platform::Status SystemInitImpl::Reset() {
+Platform::Status SystemManagerImpl::Reset() {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -406,7 +406,7 @@ Platform::Status SystemInitImpl::Reset() {
 }
 
 // Register a callback for system events
-Platform::Status SystemInitImpl::RegisterCallback(uint32_t event, void (*callback)(void* param), void* param) {
+Platform::Status SystemManagerImpl::RegisterCallback(uint32_t event, void (*callback)(void* param), void* param) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -439,37 +439,37 @@ Platform::Status SystemInitImpl::RegisterCallback(uint32_t event, void (*callbac
 }
 
 // Get the current system clock frequency
-uint32_t SystemInitImpl::GetSystemClock() const {
+uint32_t SystemManagerImpl::GetSystemClock() const {
     return system_state.system_clock_freq;
 }
 
 // Get the current AHB clock frequency
-uint32_t SystemInitImpl::GetAHBClock() const {
+uint32_t SystemManagerImpl::GetAHBClock() const {
     return system_state.ahb_clock_freq;
 }
 
 // Get the current APB1 clock frequency
-uint32_t SystemInitImpl::GetAPB1Clock() const {
+uint32_t SystemManagerImpl::GetAPB1Clock() const {
     return system_state.apb1_clock_freq;
 }
 
 // Get the current APB2 clock frequency
-uint32_t SystemInitImpl::GetAPB2Clock() const {
+uint32_t SystemManagerImpl::GetAPB2Clock() const {
     return system_state.apb2_clock_freq;
 }
 
 // Get the current clock source
-Platform::RCC::RccClockSource SystemInitImpl::GetClockSource() const {
+Platform::RCC::RccClockSource SystemManagerImpl::GetClockSource() const {
     return system_state.clock_source;
 }
 
 // Check if PLL is enabled
-bool SystemInitImpl::IsPLLEnabled() const {
+bool SystemManagerImpl::IsPLLEnabled() const {
     return system_state.pll_enabled;
 }
 
 // Set the system power mode
-Platform::Status SystemInitImpl::SetPowerMode(Platform::PWR::PowerMode mode) {
+Platform::Status SystemManagerImpl::SetPowerMode(Platform::PWR::PowerMode mode) {
 
     using namespace Platform::PWR;
     if (!initialized && mode != Platform::PWR::PowerMode::Run) {
@@ -548,12 +548,12 @@ Platform::Status SystemInitImpl::SetPowerMode(Platform::PWR::PowerMode mode) {
 }
 
 // Get the current power mode
-Platform::PWR::PowerMode SystemInitImpl::GetPowerMode() const {
+Platform::PWR::PowerMode SystemManagerImpl::GetPowerMode() const {
     return system_state.current_power_mode;
 }
 
 // Perform a software reset
-Platform::Status SystemInitImpl::SoftwareReset() {
+Platform::Status SystemManagerImpl::SoftwareReset() {
     // Trigger NVIC system reset
     Platform::CMSIS::SCB::getRegisters()->AIRCR = (0x5FA << 16) | (1 << 2);
     
@@ -566,12 +566,12 @@ Platform::Status SystemInitImpl::SoftwareReset() {
 }
 
 // Get the cause of the last reset
-ResetCause SystemInitImpl::GetResetCause() const {
+ResetCause SystemManagerImpl::GetResetCause() const {
     return static_cast<ResetCause>(system_state.reset_cause);
 }
 
 // Get system uptime in milliseconds
-uint64_t SystemInitImpl::GetUptime() const {
+uint64_t SystemManagerImpl::GetUptime() const {
     // Use SysTick to get uptime if available
     if (systick_interface) {
         // Number of SysTick ticks since system start
@@ -588,7 +588,7 @@ uint64_t SystemInitImpl::GetUptime() const {
 }
 
 // Get comprehensive system information
-Platform::Status SystemInitImpl::GetSystemInfo(SystemInfo& info) const {
+Platform::Status SystemManagerImpl::GetSystemInfo(SystemInfo& info) const {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -614,7 +614,7 @@ Platform::Status SystemInitImpl::GetSystemInfo(SystemInfo& info) const {
 }
 
 // Configure an MPU region
-Platform::Status SystemInitImpl::ConfigureMPURegion(uint8_t region, uint32_t address, 
+Platform::Status SystemManagerImpl::ConfigureMPURegion(uint8_t region, uint32_t address, 
                                                    uint32_t size, uint32_t attributes) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
@@ -660,7 +660,7 @@ Platform::Status SystemInitImpl::ConfigureMPURegion(uint8_t region, uint32_t add
 }
 
 // Read from a system register
-Platform::Status SystemInitImpl::ReadSystemRegister(uint32_t reg_addr, uint32_t& value) const {
+Platform::Status SystemManagerImpl::ReadSystemRegister(uint32_t reg_addr, uint32_t& value) const {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -677,7 +677,7 @@ Platform::Status SystemInitImpl::ReadSystemRegister(uint32_t reg_addr, uint32_t&
 }
 
 // Write to a system register
-Platform::Status SystemInitImpl::WriteSystemRegister(uint32_t reg_addr, uint32_t value) {
+Platform::Status SystemManagerImpl::WriteSystemRegister(uint32_t reg_addr, uint32_t value) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -694,7 +694,7 @@ Platform::Status SystemInitImpl::WriteSystemRegister(uint32_t reg_addr, uint32_t
 }
 
 // Configure the system clock
-Platform::Status SystemInitImpl::ConfigureSystemClock() {
+Platform::Status SystemManagerImpl::ConfigureSystemClock() {
 
 
     // Configure the system clock based on the provided configuration
@@ -751,7 +751,7 @@ Platform::Status SystemInitImpl::ConfigureSystemClock() {
     return Platform::Status::OK;
 }
 // Configure flash latency based on system clock frequency
-Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_freq, Platform::FLASH::FlashLatency latency) {
+Platform::Status SystemManagerImpl::ConfigureFlashLatency(uint32_t system_clock_freq, Platform::FLASH::FlashLatency latency) {
 
     if (!flash_interface) {
         return Platform::Status::ERROR;
@@ -816,7 +816,7 @@ Platform::Status SystemInitImpl::ConfigureFlashLatency(uint32_t system_clock_fre
 }
 
 // Configure SysTick timer
-Platform::Status SystemInitImpl::ConfigureSysTick(uint32_t interval_us) {
+Platform::Status SystemManagerImpl::ConfigureSysTick(uint32_t interval_us) {
 
     if (!systick_interface) {
         return Platform::Status::ERROR;
@@ -863,7 +863,7 @@ Platform::Status SystemInitImpl::ConfigureSysTick(uint32_t interval_us) {
 }
 
 // Configure MPU if enabled
-Platform::Status SystemInitImpl::ConfigureMPU() {
+Platform::Status SystemManagerImpl::ConfigureMPU() {
     if (!config.enableMPU) {
         return Platform::Status::OK;
     }
@@ -898,7 +898,7 @@ Platform::Status SystemInitImpl::ConfigureMPU() {
 }
 
 // Configure FPU if enabled
-Platform::Status SystemInitImpl::ConfigureFPU() {
+Platform::Status SystemManagerImpl::ConfigureFPU() {
     if (!initialized || !config.enableFPU) {
         return Platform::Status::OK;
     }
@@ -929,7 +929,7 @@ Platform::Status SystemInitImpl::ConfigureFPU() {
 }
 
 // Configure cache settings
-Platform::Status SystemInitImpl::ConfigureCache() {
+Platform::Status SystemManagerImpl::ConfigureCache() {
     // Set cache configuration based on settings
 
     if(!flash_interface) {
@@ -961,7 +961,7 @@ Platform::Status SystemInitImpl::ConfigureCache() {
 
 // Determine the cause of the reset
 // Determine the cause of the reset
-ResetCause SystemInitImpl::DetermineResetCause() {
+ResetCause SystemManagerImpl::DetermineResetCause() {
     // Get RCC interface
     if (!rcc_interface) {
         // Fallback to default if interface isn't available yet
@@ -998,7 +998,7 @@ ResetCause SystemInitImpl::DetermineResetCause() {
 }
 
 // Clear reset flags
-void SystemInitImpl::ClearResetFlags() {
+void SystemManagerImpl::ClearResetFlags() {
     // Use RCC interface to clear reset flags
     if (rcc_interface) {
         rcc_interface->Control(Platform::RCC::RCC_CTRL_CLEAR_RESET_FLAGS, nullptr);

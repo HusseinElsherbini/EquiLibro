@@ -3,9 +3,14 @@
 #pragma once
 
 #include "common/platform.hpp"
+#include "hardware_abstraction/rcc.hpp" 
 #include "middleware/middleware_module.hpp"
 #include "hardware_abstraction/flash.hpp"
 #include "hardware_abstraction/pwr.hpp"
+#include "system_services/system_manager.hpp"   
+#include "common/platform_cmsis.hpp"
+#include "hardware_abstraction/systick.hpp"
+
 namespace Middleware {
 namespace SystemServices {
 
@@ -79,10 +84,10 @@ enum class SystemEvent {
  * configuration, flash setup, core peripheral initialization, and
  * power management.
  */
-class SystemInit : public MiddlewareModule {
+class SystemManager : public MiddlewareModule {
 public:
     // Get singleton instance
-    static SystemInit& GetInstance();
+    static SystemManager& GetInstance();
     
     // Default system configuration preset for common scenarios
     static SystemInitConfig GetDefaultConfig();
@@ -137,30 +142,30 @@ constexpr uint32_t SYSTEM_EVENT_ERROR = 0x2704;
 
 // Global convenience functions
 inline uint32_t GetSystemClock() {
-    return SystemInit::GetInstance().GetSystemClock();
+    return SystemManager::GetInstance().GetSystemClock();
 }
 
 inline uint32_t GetAHBClock() {
-    return SystemInit::GetInstance().GetAHBClock();
+    return SystemManager::GetInstance().GetAHBClock();
 }
 
 inline uint32_t GetAPB1Clock() {
-    return SystemInit::GetInstance().GetAPB1Clock();
+    return SystemManager::GetInstance().GetAPB1Clock();
 }
 
 inline uint32_t GetAPB2Clock() {
-    return SystemInit::GetInstance().GetAPB2Clock();
+    return SystemManager::GetInstance().GetAPB2Clock();
 }
 
 inline Platform::PWR::PowerMode GetPowerMode() {
-    return SystemInit::GetInstance().GetPowerMode();
+    return SystemManager::GetInstance().GetPowerMode();
 }
 
 inline uint64_t GetSystemUptime() {
-    return SystemInit::GetInstance().GetUptime();
+    return SystemManager::GetInstance().GetUptime();
 }
 
-class SystemInitImpl : public SystemInit {
+class SystemManagerImpl : public SystemManager {
     private:
         // Internal state tracking
         bool initialized;
@@ -211,8 +216,8 @@ class SystemInitImpl : public SystemInit {
         
     public:
         // Constructor/Destructor
-        SystemInitImpl();
-        ~SystemInitImpl();
+        SystemManagerImpl();
+        ~SystemManagerImpl();
         
         // MiddlewareModule interface implementation
         Platform::Status Init(void* config) override;
