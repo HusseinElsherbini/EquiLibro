@@ -9,9 +9,15 @@ MEMORY
 
 SECTIONS
 {
+
+    .isr_vector :
+  {
+    . = ALIGN(4);
+    KEEP(*(.isr_vector))
+    . = ALIGN(4);
+  } > FLASH
   .text :
   {
-    *(.isr_vector)
     *(.imu_dmp_fw)
     *(.text)
     *(.text.*)

@@ -5,12 +5,15 @@
 #include "hw_interface.hpp"
 #include "common/platform.hpp"
 #include "common/platform_i2c.hpp"
-#include <mutex>
+#include "os/mutex.hpp"
 #include <vector>
 #include <memory>
+#include "system_services/system_timing.hpp"        
 
 namespace Platform {
-    namespace I2C {
+    namespace I2C {    
+        
+
 /**
  * I2C transfer request structure
  * Contains all parameters needed for an I2C transfer operation
@@ -30,7 +33,7 @@ struct I2CTransferRequest {
  * I2C configuration structure
  */
 struct I2CConfig {
-    uint8_t i2c_instance;                    // I2C peripheral instance (1-3)
+    I2CInstance i2c_instance;                // I2C peripheral instance (1-3)
     Platform::I2C::Mode mode;                // Master or slave mode
     Platform::I2C::Speed speed;              // Standard (100kHz) or Fast (400kHz)
     Platform::I2C::AddrMode addressing_mode; // 7-bit or 10-bit addressing
@@ -91,10 +94,10 @@ class I2CInterface : public HwInterface {
 private:
     // Internal state tracking
     bool initialized;
-    uint8_t instance;
+    I2CInstance instance;
     I2CConfig config;
     
-    Middleware::SystemServices::SystemTiming& timing_service;
+    static Middleware::SystemServices::SystemTiming* timing_service;
 
     struct TransferState {
         bool in_progress;
@@ -126,9 +129,6 @@ private:
     
     CallbackEntry callbacks[static_cast<uint32_t>(I2CEvent::Max)];
     
-    // Mutex for thread safety
-    std::mutex transfer_mutex;
-    
     // Helper methods
     Platform::Status ConfigurePins();
     Platform::Status CalculateTimingParameters();
@@ -147,19 +147,18 @@ private:
     Platform::Status SendStop();
     Platform::Status RecoverBus();
     
-    // Constructor for limited instantiation
-    explicit I2CInterface(uint8_t instance);
-    
-    // Deleted copy constructor and assignment operator
-    I2CInterface(const I2CInterface&) = delete;
-    I2CInterface& operator=(const I2CInterface&) = delete;
-    
-    // Static array of instances
-    static std::vector<std::weak_ptr<I2CInterface>> instances;
-    static std::mutex instances_mutex;
 
+    // Deleted assignment operator
+    I2CInterface(const I2CInterface&);
+    I2CInterface& operator=(const I2CInterface&) = delete;    
     
-public:
+    // Factory method for getting I2C interface
+    static I2CInterface& GetInstance(I2CInstance instance);
+    
+public:    
+
+    // Constructor for limited instantiation
+    explicit I2CInterface(I2CInstance instance);
     // Destructor
     ~I2CInterface() override;
     
@@ -180,13 +179,11 @@ public:
                                 uint8_t* data, uint16_t size, uint32_t timeout);
     Platform::Status IsDeviceReady(uint16_t dev_addr, uint32_t trials, uint32_t timeout);
     
-    // Getters
-    uint8_t GetInstance() const { return instance; }
+
     bool IsBusy() const { return transfer_state.in_progress; }
     I2CError GetLastError() const { return transfer_state.last_error; }
     
-    // Factory method for getting I2C interface
-    static std::shared_ptr<I2CInterface> GetInstance(uint8_t instance);
+
     
     // Allow interrupt handlers to access private state
     friend void I2C1_EV_IRQHandler();

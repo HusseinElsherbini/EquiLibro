@@ -168,3 +168,6 @@ void ErrorManager::ClearErrorHistory() {
         error = ErrorInfo{Platform::Status::OK};
     }
 }
+}
+}
+}

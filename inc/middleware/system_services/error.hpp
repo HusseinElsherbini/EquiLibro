@@ -3,6 +3,8 @@
 #include "common/platform.hpp"
 #include <array>
 #include <atomic>
+#include <cassert>
+#include <functional>
 
 namespace Middleware {
 namespace SystemServices {

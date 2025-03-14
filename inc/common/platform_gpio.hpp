@@ -12,15 +12,7 @@ namespace GPIO {
     constexpr uint32_t GPIOH_BASE = (AHB1PERIPH_BASE + 0x1C00UL);
 
 
-    struct GpioConfig {
-        Platform::GPIO::Port port;            // GPIO port (A, B, C, etc.)
-        uint8_t pin;                          // Pin number (0-15)
-        Platform::GPIO::Mode mode;            // Pin mode (Input, Output, Alternate, Analog)
-        Platform::GPIO::OutputType outputType; // Output type (Push-Pull, Open-Drain)
-        Platform::GPIO::Pull pull;            // Pull-up/Pull-down configuration
-        Platform::GPIO::Speed speed;          // GPIO speed
-        Platform::GPIO::AlternateFunction af; // Alternate function (if mode is AlternateFunction)
-    };
+
     
     /**
      * GPIO pin state enumeration
@@ -88,7 +80,15 @@ namespace GPIO {
         AF14 = 0x0E,
         AF15 = 0x0F
     };
-
+    struct GpioConfig {
+        Platform::GPIO::Port port;            // GPIO port (A, B, C, etc.)
+        uint8_t pin;                          // Pin number (0-15)
+        Platform::GPIO::Mode mode;            // Pin mode (Input, Output, Alternate, Analog)
+        Platform::GPIO::OutputType outputType; // Output type (Push-Pull, Open-Drain)
+        Platform::GPIO::Pull pull;            // Pull-up/Pull-down configuration
+        Platform::GPIO::Speed speed;          // GPIO speed
+        Platform::GPIO::AlternateFunction af; // Alternate function (if mode is AlternateFunction)
+    };
     // GPIO register structure
     struct Registers {
         volatile uint32_t MODER;     // GPIO port mode register

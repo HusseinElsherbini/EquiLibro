@@ -30,27 +30,7 @@ namespace TIM {
         TIM10 = 10,
         TIM11 = 11
     };
-    struct TimerConfig {
-        uint8_t timerInstance;             // Timer instance (1-5)
-        Mode mode;                    // Timer operating mode
-        ClockDivision clockDivision;  // Clock division
-        Direction direction;          // Count direction
-        Alignment alignment;          // Alignment mode
-        uint32_t prescaler;                // Timer prescaler
-        uint32_t period;                   // Timer period (auto-reload value)
-        bool autoReloadPreload;            // Auto-reload preload enable
-    };
     
-    /**
-     * Timer channel configuration structure
-     */
-    struct TimerChannelConfig {
-        Channel channel;          // Timer channel
-        OCMode ocMode;            // Output compare mode
-        uint32_t pulse;                // Pulse value (capture/compare register)
-        bool ocPreload;                // Output compare preload enable
-        bool complementaryOutput;      // Enable complementary output
-    };
     // Timer operating modes
     enum class Mode {
         Basic,          // Basic timer operation

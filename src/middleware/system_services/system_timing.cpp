@@ -5,6 +5,7 @@
 #include "hardware_abstraction/systick.hpp"
 #include "hardware_abstraction/rcc.hpp"
 #include <memory>
+#include <os/mutex.hpp>
 
 #ifdef USE_FREERTOS
 #include "FreeRTOS.h"
@@ -232,7 +233,7 @@ Platform::Status SystemTiming::Reset() {
     
     // Clear all timers
     {
-        std::lock_guard<std::mutex> lock(timer_mutex);
+        std::lock_guard<OS::mutex> lock(timer_mutex);
         timers.clear();
         next_timer_id = 1;
     }
@@ -288,7 +289,7 @@ void SystemTiming::UpdateTimestamp() {
 
 // Check and trigger elapsed timer callbacks
 void SystemTiming::CheckAndTriggerTimers() {
-    std::lock_guard<std::mutex> lock(timer_mutex);
+    OS::lock_guard<OS::mutex> lock(timer_mutex);
     
     uint64_t current_time = GetMicroseconds();
     
@@ -482,7 +483,7 @@ uint32_t SystemTiming::CreateTimer(uint32_t period_us, TimerCallback callback, v
         return 0; // Invalid timer ID
     }
     
-    std::lock_guard<std::mutex> lock(timer_mutex);
+    OS::lock_guard<OS::mutex> lock(timer_mutex);
     
     // Create a new timer handle
     TimerHandle timer;
@@ -506,7 +507,7 @@ bool SystemTiming::StartTimer(uint32_t timer_id) {
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(timer_mutex);
+    OS::lock_guard<OS::mutex> lock(timer_mutex);
     
     // Find the timer by ID
     for (auto& timer : timers) {
@@ -526,7 +527,7 @@ bool SystemTiming::StopTimer(uint32_t timer_id) {
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(timer_mutex);
+    OS::lock_guard<OS::mutex> lock(timer_mutex);
     
     // Find the timer by ID
     for (auto& timer : timers) {
@@ -545,7 +546,7 @@ bool SystemTiming::DeleteTimer(uint32_t timer_id) {
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(timer_mutex);
+    OS::lock_guard<OS::mutex> lock(timer_mutex);
     
     // Find and remove the timer by ID
     for (auto it = timers.begin(); it != timers.end(); ++it) {

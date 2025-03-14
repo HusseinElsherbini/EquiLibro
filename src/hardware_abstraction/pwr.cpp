@@ -2,22 +2,19 @@
 #include "hardware_abstraction/pwr.hpp"
 #include "hardware_abstraction/rcc.hpp"
 #include "common/platform_cmsis.hpp"
-
+#include "os/mutex.hpp"
 namespace Platform {
 namespace PWR {
 
 
-// Static instance
-static std::shared_ptr<PowerInterfaceImpl> power_controller_instance = nullptr;
-static std::mutex instance_mutex;
-
 // Get singleton instance
-static PowerInterface& GetInstance(){
-    std::lock_guard<std::mutex> lock(instance_mutex);
-    if (power_controller_instance == nullptr) {
-        power_controller_instance = std::make_shared<PowerInterfaceImpl>();
-    }
-    return *power_controller_instance;
+PowerInterface& PowerInterface::GetInstance(){
+
+
+    static PowerInterfaceImpl power_controller_instance;
+
+    return power_controller_instance;
+
 }
 
 // Constructor
@@ -41,7 +38,7 @@ PowerInterfaceImpl::~PowerInterfaceImpl() {
 
 // Initialize the power controller
 Platform::Status PowerInterfaceImpl::Init(void* config) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     if (initialized) {
         return Platform::Status::OK; // Already initialized
@@ -134,7 +131,7 @@ Platform::Status PowerInterfaceImpl::Init(void* config) {
 
 // Deinitialize the power controller
 Platform::Status PowerInterfaceImpl::DeInit() {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
@@ -227,7 +224,7 @@ Platform::Status PowerInterfaceImpl::RegisterCallback(uint32_t eventId, void (*c
         return Platform::Status::INVALID_PARAM;
     }
     
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     callbacks[eventId].callback = callback;
     callbacks[eventId].param = param;
@@ -238,7 +235,7 @@ Platform::Status PowerInterfaceImpl::RegisterCallback(uint32_t eventId, void (*c
 
 // Enter Sleep mode
 Platform::Status PowerInterfaceImpl::EnterSleepMode(SleepEntryMode entry_mode) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     // Clear SLEEPDEEP bit to enter Sleep mode instead of Deep Sleep
     Platform::CMSIS::SCB::getRegisters()->SCR &= ~(1 << 2);
@@ -255,7 +252,7 @@ Platform::Status PowerInterfaceImpl::EnterSleepMode(SleepEntryMode entry_mode) {
 
 // Enter Stop mode
 Platform::Status PowerInterfaceImpl::EnterStopMode(RegulatorMode mode, SleepEntryMode entry_mode) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -287,7 +284,7 @@ Platform::Status PowerInterfaceImpl::EnterStopMode(RegulatorMode mode, SleepEntr
 
 // Enter Standby mode
 Platform::Status PowerInterfaceImpl::EnterStandbyMode() {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -315,7 +312,7 @@ Platform::Status PowerInterfaceImpl::EnterStandbyMode() {
 
 // Set voltage scaling
 Platform::Status PowerInterfaceImpl::SetVoltageScale(VoltageScale scale) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -352,7 +349,7 @@ Platform::Status PowerInterfaceImpl::SetVoltageScale(VoltageScale scale) {
 
 // Get current voltage scaling
 Platform::Status PowerInterfaceImpl::GetVoltageScale(VoltageScale& scale) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -372,7 +369,7 @@ Platform::Status PowerInterfaceImpl::GetVoltageScale(VoltageScale& scale) {
 
 // Set regulator mode
 Platform::Status PowerInterfaceImpl::SetRegulatorMode(RegulatorMode mode) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -388,7 +385,7 @@ Platform::Status PowerInterfaceImpl::SetRegulatorMode(RegulatorMode mode) {
 
 // Get current regulator mode
 Platform::Status PowerInterfaceImpl::GetRegulatorMode(RegulatorMode& mode) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -404,7 +401,7 @@ Platform::Status PowerInterfaceImpl::GetRegulatorMode(RegulatorMode& mode) {
 
 // Configure wake-up pin
 Platform::Status PowerInterfaceImpl::ConfigureWakeupPin(const WakeupPinConfig& config) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     // Validate pin number (STM32F4 has up to 3 wake-up pins, depending on the model)
     if (config.pin_number < 1 || config.pin_number > 3) {
@@ -452,7 +449,7 @@ Platform::Status PowerInterfaceImpl::ConfigureWakeupPin(const WakeupPinConfig& c
  
  // Enable a specific wake-up pin
  Platform::Status PowerInterfaceImpl::EnableWakeupPin(uint8_t pin_number) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     // Validate pin number
     if (pin_number < 1 || pin_number > 3) {
@@ -483,7 +480,7 @@ Platform::Status PowerInterfaceImpl::ConfigureWakeupPin(const WakeupPinConfig& c
  
  // Disable a specific wake-up pin
  Platform::Status PowerInterfaceImpl::DisableWakeupPin(uint8_t pin_number) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     // Validate pin number
     if (pin_number < 1 || pin_number > 3) {
@@ -514,7 +511,7 @@ Platform::Status PowerInterfaceImpl::ConfigureWakeupPin(const WakeupPinConfig& c
  
  // Enable write access to backup domain
  Platform::Status PowerInterfaceImpl::EnableBackupDomainWrite() {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -526,7 +523,7 @@ Platform::Status PowerInterfaceImpl::ConfigureWakeupPin(const WakeupPinConfig& c
  
  // Disable write access to backup domain
  Platform::Status PowerInterfaceImpl::DisableBackupDomainWrite() {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     
@@ -546,7 +543,7 @@ Platform::Status PowerInterfaceImpl::ConfigureWakeupPin(const WakeupPinConfig& c
  
  // Configure the Power Voltage Detector (PVD)
  Platform::Status PowerInterfaceImpl::ConfigurePVD(bool enable, uint8_t level) {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     // Validate level parameter
     if (level > 7) {
@@ -614,7 +611,7 @@ Platform::Status PowerInterfaceImpl::ConfigureWakeupPin(const WakeupPinConfig& c
  
  // Clear wake-up flags
  Platform::Status PowerInterfaceImpl::ClearWakeupFlags() {
-    std::lock_guard<std::mutex> lock(power_mutex);
+    OS::lock_guard<OS::mutex> lock(power_mutex);
     
     Registers* pwr = getRegisters();
     

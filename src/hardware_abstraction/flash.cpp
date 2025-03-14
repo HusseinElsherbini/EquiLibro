@@ -3,8 +3,8 @@
 #include "hardware_abstraction/flash.hpp"
 #include "common/platform_flash.hpp"
 #include "middleware/system_services/system_timing.hpp"
-#include <mutex>
-
+#include "os/mutex.hpp"
+#include <cstring>
 namespace Platform {
 namespace FLASH {
 
@@ -107,7 +107,7 @@ Platform::Status FlashInterfaceImpl::Control(uint32_t command, void* param) {
             WriteParams* write_params = static_cast<WriteParams*>(param);
             return WriteData(write_params->address, write_params->data, write_params->size);
         }
-        case FLASH_CTRL_FIND_SECTOR:
+        case FLASH_CTRL_FIND_SECTOR: {
             if (param == nullptr) {
                 return Platform::Status::INVALID_PARAM;
             }
@@ -119,7 +119,7 @@ Platform::Status FlashInterfaceImpl::Control(uint32_t command, void* param) {
                 return Platform::Status::ERROR;
             }
             return Platform::Status::OK;
-
+        }
         case FLASH_CTRL_ERASE_SECTOR: {
             if (param == nullptr) {
                 return Platform::Status::INVALID_PARAM;
@@ -215,6 +215,8 @@ Platform::Status FlashInterfaceImpl::Read(void* buffer, uint16_t size, uint32_t 
         return Platform::Status::INVALID_PARAM;
     }
     
+    //TODO: Implement a timeout for flash reads
+    (void)timeout;
     // For direct reads, use a default address in flash
     // This is generally not the preferred method - use ReadData with explicit address instead
     return ReadData(0x08000000, buffer, size);
@@ -229,7 +231,8 @@ Platform::Status FlashInterfaceImpl::Write(const void* data, uint16_t size, uint
     if (data == nullptr || size == 0) {
         return Platform::Status::INVALID_PARAM;
     }
-    
+    //TODO: Implement a timeout for flash reads
+    (void)timeout;
     // For direct writes, use a default address in flash
     // This is generally not the preferred method - use WriteData with explicit address instead
     return WriteData(0x08000000, data, size);
@@ -254,7 +257,7 @@ Platform::Status FlashInterfaceImpl::RegisterCallback(uint32_t event_id, void (*
 
 // Configure flash settings
 Platform::Status FlashInterfaceImpl::Configure(const FlashConfig& config) {
-    std::lock_guard<std::mutex> lock(flash_mutex);
+    OS::lock_guard<OS::mutex> lock(flash_mutex);
     
     // Store the configuration
     this->config = config;
@@ -347,7 +350,7 @@ Platform::Status FlashInterfaceImpl::WriteData(uint32_t address, const void* dat
         return Platform::Status::ERROR;
     }
     
-    std::lock_guard<std::mutex> lock(flash_mutex);
+    OS::lock_guard<OS::mutex> lock(flash_mutex);
     
     // Get FLASH registers
     volatile Platform::FLASH::Registers* flash_regs = Platform::FLASH::getRegisters();
@@ -423,7 +426,7 @@ Platform::Status FlashInterfaceImpl::EraseSector(uint8_t sector) {
         return Platform::Status::ERROR;
     }
     
-    std::lock_guard<std::mutex> lock(flash_mutex);
+    OS::lock_guard<OS::mutex> lock(flash_mutex);
     
     // Get FLASH registers
     volatile Platform::FLASH::Registers* flash_regs = Platform::FLASH::getRegisters();
@@ -497,7 +500,7 @@ Platform::Status FlashInterfaceImpl::MassErase() {
         return Platform::Status::ERROR;
     }
     
-    std::lock_guard<std::mutex> lock(flash_mutex);
+    OS::lock_guard<OS::mutex> lock(flash_mutex);
     
     // Get FLASH registers
     volatile Platform::FLASH::Registers* flash_regs = Platform::FLASH::getRegisters();
@@ -602,7 +605,7 @@ Platform::Status FlashInterfaceImpl::Lock() {
         return Platform::Status::NOT_INITIALIZED;
     }
     
-    std::lock_guard<std::mutex> lock(flash_mutex);
+    OS::lock_guard<OS::mutex> lock(flash_mutex);
     
     // Set the lock bit in the control register
     volatile Platform::FLASH::Registers* flash_regs = Platform::FLASH::getRegisters();
@@ -623,7 +626,7 @@ Platform::Status FlashInterfaceImpl::Unlock() {
         return Platform::Status::NOT_INITIALIZED;
     }
     
-    std::lock_guard<std::mutex> lock(flash_mutex);
+    OS::lock_guard<OS::mutex> lock(flash_mutex);
     
     // Write unlock keys to key register
     volatile Platform::FLASH::Registers* flash_regs = Platform::FLASH::getRegisters();

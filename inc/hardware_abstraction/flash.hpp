@@ -4,21 +4,10 @@
 #include "common/platform.hpp"
 #include "common/platform_flash.hpp"
 #include <memory>
+#include "os/mutex.hpp"
 
 namespace Platform {
 namespace FLASH {
-
-/**
- * @brief Flash memory configuration structure
- * 
- * Contains all parameters needed to configure flash memory access
- */
-struct FlashConfig {
-    FlashLatency latency;           // Flash latency (wait states)
-    bool prefetch_enable;      // Enable prefetch buffer
-    bool icache_enable;        // Enable instruction cache
-    bool dcache_enable;        // Enable data cache
-};
 
 /**
  * @brief Flash operation mode for programming/erase
@@ -62,7 +51,12 @@ enum class FlashEvent {
     OperationError,        // Error occurred during flash operation
     Max                    // Must be last - used for array sizing
 };
-
+struct FlashConfig {
+    FlashLatency latency;           // Flash latency (wait states)
+    bool prefetch_enable;      // Enable prefetch buffer
+    bool icache_enable;        // Enable instruction cache
+    bool dcache_enable;        // Enable data cache
+};
 /**
  * @brief Flash interface providing hardware abstraction for flash memory
  * 
@@ -145,7 +139,7 @@ class FlashInterfaceImpl : public Platform::FLASH::FlashInterface {
         };
         
         // Mutex for thread safety
-        std::mutex flash_mutex;
+        OS::mutex flash_mutex;
         
         // Helper methods
         Platform::Status WaitForOperation(uint32_t timeout_ms);

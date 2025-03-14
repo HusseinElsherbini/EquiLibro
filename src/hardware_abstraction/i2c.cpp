@@ -6,18 +6,19 @@
 #include "system_services/system_timing.hpp"
 #include "common/platform_cmsis.hpp"
 #include <algorithm>
+#include "os/mutex.hpp"
 
 namespace Platform {
 namespace I2C {
-// Static array of instances (initialized to empty)
-std::vector<std::weak_ptr<I2CInterface>> I2CInterface::instances(3);
-std::mutex I2CInterface::instances_mutex;
+
+Middleware::SystemServices::SystemTiming *timing_service = nullptr;
+OS::mutex transfer_mutex;
+static OS::mutex instances_mutex;
 
 // Constructor
-I2CInterface::I2CInterface(uint8_t instance) 
+I2CInterface::I2CInterface(I2CInstance instance) 
     : initialized(false), 
-      instance(instance),
-      timing_service(Middleware::SystemServices::SystemTiming::GetInstance()){
+      instance(instance){
     
     // Initialize transfer state
     transfer_state.in_progress = false;
@@ -26,7 +27,8 @@ I2CInterface::I2CInterface(uint8_t instance)
     transfer_state.last_error = I2CError::None;
     transfer_state.repeated_start = false;
     transfer_state.notify_task = nullptr;
- 
+    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
+    
     // Initialize callbacks
     for (auto& callback : callbacks) {
         callback.callback = nullptr;
@@ -43,26 +45,47 @@ I2CInterface::~I2CInterface() {
 }
 
 // Factory method for getting or creating I2C interface instance
-std::shared_ptr<I2CInterface> I2CInterface::GetInstance(uint8_t instance) {
-    // Validate instance number
-    if (instance < 1 || instance > 3) {
-        return nullptr;
-    }
+I2CInterface& I2CInterface::GetInstance(I2CInstance instance) {
 
-    std::lock_guard<std::mutex> lock(instances_mutex);
-    
-    // Convert to zero-based index
-    uint8_t index = instance - 1;
-    
-    // Check if we have an existing non-expired instance
-    std::shared_ptr<I2CInterface> interface = instances[index].lock();
-    if (!interface) {
-        // Create a new instance if none exists or if previous one expired
-        interface = std::shared_ptr<I2CInterface>(new I2CInterface(instance));
-        instances[index] = interface;
+    if (instance < I2CInstance::I2C1 || instance > I2CInstance::I2C3) {
+        // Since we can't return nullptr with references, default to I2C1
+        instance = I2CInstance::I2C1;
     }
+    // Convert to zero-based index
+    size_t index = static_cast<uint8_t>(instance) - 1;
     
-    return interface;
+    OS::lock_guard<OS::mutex> lock(instances_mutex);
+    
+    // static array of actual instances
+    static I2CInterface instances[I2C_INSTANCE_COUNT] = {
+
+        I2CInterface(I2CInstance::I2C1), I2CInterface(I2CInstance::I2C2), I2CInterface(I2CInstance::I2C3)
+    };
+    
+    return instances[index];
+}
+
+// Definition of copy constructor, declared private to prevent copying outside of the getInstance function
+I2CInterface::I2CInterface(const I2CInterface& other)
+    : initialized(false), // Start uninitialized regardless of source
+      instance(other.instance) {
+    
+    // Reset transfer state instead of copying it
+    transfer_state.in_progress = false;
+    transfer_state.state = CurrentTransferState::Idle;
+    transfer_state.data_index = 0;
+    transfer_state.last_error = I2CError::None;
+    transfer_state.repeated_start = false;
+    transfer_state.notify_task = nullptr;
+    
+    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
+    
+    // Initialize callbacks to empty instead of copying
+    for (auto& callback : callbacks) {
+        callback.callback = nullptr;
+        callback.param = nullptr;
+        callback.enabled = false;
+    }
 }
 
 // Get I2C register base address for this instance
@@ -113,7 +136,7 @@ Platform::Status I2CInterface::ConfigurePins() {
     };
     
     // Get the pin mapping for this I2C instance
-    const I2CPinMapping& pins = i2c_pins[instance - 1];
+    const I2CPinMapping& pins = i2c_pins[static_cast<uint8_t>(instance) - 1];
     
     // Common configuration for I2C pins
     Platform::GPIO::GpioConfig pin_config = {
@@ -152,7 +175,7 @@ Platform::Status I2CInterface::CalculateTimingParameters() {
     }
     
     // Get RCC interface to determine peripheral clock frequency
-    auto rcc = Platform::RCC::RccInterface::GetInstance();
+    Platform::RCC::RccInterface* rcc = &Platform::RCC::RccInterface::GetInstance();
     
     // Determine peripheral clock frequency
     uint32_t pclk1_freq = rcc->GetApb1ClockFrequency();
@@ -212,11 +235,11 @@ Platform::Status I2CInterface::CalculateTimingParameters() {
 // Initialize I2C interface
 Platform::Status I2CInterface::Init(void* config) {
 
-    if (!timing_service.initialized) {
+    if (!timing_service->IsInitialized()) {
         return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
     }
     // Check if already initialized
-    if (initialized) {
+    if (this->initialized) {
         return Platform::Status::OK; // Already initialized
     }
     
@@ -229,17 +252,17 @@ Platform::Status I2CInterface::Init(void* config) {
     this->config = *static_cast<I2CConfig*>(config);
     
     // Enable I2C peripheral clock
-    auto rcc = Platform::RCC::RccInterface::GetInstance();
+    Platform::RCC::RccInterface* rcc = &Platform::RCC::RccInterface::GetInstance();
     Platform::RCC::RccPeripheral i2c_clock;
     
-    switch (instance) {
-        case 1:
+    switch (this->instance) {
+        case I2CInstance::I2C1:
             i2c_clock = Platform::RCC::RccPeripheral::I2C1;
             break;
-        case 2:
+        case I2CInstance::I2C2:
             i2c_clock = Platform::RCC::RccPeripheral::I2C2;
             break;
-        case 3:
+        case I2CInstance::I2C3:
             i2c_clock = Platform::RCC::RccPeripheral::I2C3;
             break;
         default:
@@ -300,16 +323,16 @@ Platform::Status I2CInterface::Init(void* config) {
         // Enable I2C interrupts in NVIC
         Platform::CMSIS::NVIC::IRQn ev_irq, er_irq;
         
-        switch (instance) {
-            case 1:
+        switch (this->instance) {
+            case I2CInstance::I2C1:
                 ev_irq = Platform::CMSIS::NVIC::IRQn::I2C1_EV;
                 er_irq = Platform::CMSIS::NVIC::IRQn::I2C1_ER;
                 break;
-            case 2:
+            case I2CInstance::I2C2:
                 ev_irq = Platform::CMSIS::NVIC::IRQn::I2C2_EV;
                 er_irq = Platform::CMSIS::NVIC::IRQn::I2C2_ER;
                 break;
-            case 3:
+            case I2CInstance::I2C3:
                 ev_irq = Platform::CMSIS::NVIC::IRQn::I2C3_EV;
                 er_irq = Platform::CMSIS::NVIC::IRQn::I2C3_ER;
                 break;
@@ -358,16 +381,16 @@ Platform::Status I2CInterface::DeInit() {
     if (config.enable_interrupts) {
         Platform::CMSIS::NVIC::IRQn ev_irq, er_irq;
         
-        switch (instance) {
-            case 1:
+        switch (this->instance) {
+            case I2CInstance::I2C1:
                 ev_irq = Platform::CMSIS::NVIC::IRQn::I2C1_EV;
                 er_irq = Platform::CMSIS::NVIC::IRQn::I2C1_ER;
                 break;
-            case 2:
+            case I2CInstance::I2C2:
                 ev_irq = Platform::CMSIS::NVIC::IRQn::I2C2_EV;
                 er_irq = Platform::CMSIS::NVIC::IRQn::I2C2_ER;
                 break;
-            case 3:
+            case I2CInstance::I2C3:
                 ev_irq = Platform::CMSIS::NVIC::IRQn::I2C3_EV;
                 er_irq = Platform::CMSIS::NVIC::IRQn::I2C3_ER;
                 break;
@@ -381,17 +404,17 @@ Platform::Status I2CInterface::DeInit() {
     }
     
     // Disable I2C peripheral clock
-    auto rcc = Platform::RCC::RccInterface::GetInstance();
+    Platform::RCC::RccInterface* rcc = &Platform::RCC::RccInterface::GetInstance();
     Platform::RCC::RccPeripheral i2c_clock;
     
-    switch (instance) {
-        case 1:
+    switch (this->instance) {
+        case I2CInstance::I2C1:
             i2c_clock = Platform::RCC::RccPeripheral::I2C1;
             break;
-        case 2:
+        case I2CInstance::I2C2:
             i2c_clock = Platform::RCC::RccPeripheral::I2C2;
             break;
-        case 3:
+        case I2CInstance::I2C3:
             i2c_clock = Platform::RCC::RccPeripheral::I2C3;
             break;
         default:
@@ -415,7 +438,7 @@ Platform::Status I2CInterface::DeInit() {
 // I2C Control function
 Platform::Status I2CInterface::Control(uint32_t command, void* param) {
     // Check if initialized
-    if (!initialized) {
+    if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
@@ -553,7 +576,7 @@ Platform::Status I2CInterface::Write(const void* data, uint16_t size, uint32_t t
 // Register callback for I2C events
 Platform::Status I2CInterface::RegisterCallback(uint32_t eventId, void (*callback)(void* param), void* param) {
     // Check if initialized
-    if (!initialized) {
+    if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
@@ -588,7 +611,7 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     }
     
     // Lock the transfer mutex for thread safety
-    std::lock_guard<std::mutex> lock(transfer_mutex);
+    OS::lock_guard<OS::mutex> lock(transfer_mutex);
     
     // Get I2C registers
     auto i2c = GetI2CRegisters();
@@ -598,15 +621,15 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     
     // Wait until bus is free
 
-    uint64_t start_time = timing_service.GetMilliseconds();
+    uint64_t start_time = timing_service->GetMilliseconds();
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if (timing_service.GetMilliseconds() - start_time > timeout) {
+        if (timing_service->GetMilliseconds() - start_time > timeout) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
     
     // Update transfer state
@@ -621,14 +644,14 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     if (non_blocking && config.enable_interrupts) {
 
         // Wait until bus is free (this part is still blocking)
-        uint64_t start_time = timing_service.GetMilliseconds();
+        uint64_t start_time = timing_service->GetMilliseconds();
 
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            timing_service.DelayMicroseconds(10);
+            timing_service->DelayMicroseconds(10);
             
             // Check for timeout with a reasonable default
-            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service->GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -726,17 +749,17 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::STOP);
     
     // 9. Wait for STOP bit to be cleared
-    start_time = timing_service.GetMilliseconds();
+    start_time = timing_service->GetMilliseconds();
     while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
         // Check for timeout
-        if (timing_service.GetMilliseconds() - start_time > timeout) {
+        if (timing_service->GetMilliseconds() - start_time > timeout) {
             transfer_state.in_progress = false;
             transfer_state.last_error = I2CError::Timeout;
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
     // Reset transfer state
     transfer_state.in_progress = false;
@@ -755,7 +778,7 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
 // Receive data from I2C device
 Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, uint16_t size, uint32_t timeout) {
     // Check if initialized
-    if (!initialized) {
+    if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
@@ -770,7 +793,7 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
     }
     
     // Lock the transfer mutex for thread safety
-    std::lock_guard<std::mutex> lock(transfer_mutex);
+    OS::lock_guard<OS::mutex> lock(transfer_mutex);
     
     // Get I2C registers
     auto i2c = GetI2CRegisters();
@@ -779,15 +802,15 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
     }
     
     // Wait until bus is free
-    uint64_t start_time = timing_service.GetMilliseconds(); // Convert to ms
+    uint64_t start_time = timing_service->GetMilliseconds(); // Convert to ms
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if (timing_service.GetMilliseconds() - start_time > timeout) {
+        if (timing_service->GetMilliseconds() - start_time > timeout) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
 
     // Enable acknowledgement
@@ -804,13 +827,13 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
     // For non-blocking operations, we'll use interrupts if they're enabled
     if (non_blocking && config.enable_interrupts) {
         // Wait until bus is free (this part is still blocking)
-        uint64_t start_time = timing_service.GetMilliseconds();
+        uint64_t start_time = timing_service->GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            timing_service.DelayMicroseconds(10);
+            timing_service->DelayMicroseconds(10);
             
             // Check for timeout with a reasonable default
-            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service->GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -974,17 +997,17 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
     i2c->CR1 &= ~Platform::I2C::getBitValue(Platform::I2C::CR1::POS);
     
     // Wait for STOP bit to be cleared
-    start_time = timing_service.GetMilliseconds();
+    start_time = timing_service->GetMilliseconds();
     while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
         // Check for timeout
-        if (timing_service.GetMilliseconds() - start_time > timeout) {
+        if (timing_service->GetMilliseconds() - start_time > timeout) {
             transfer_state.in_progress = false;
             transfer_state.last_error = I2CError::Timeout;
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
     
     // Reset transfer state
@@ -1005,7 +1028,7 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
 Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr, uint8_t mem_addr_size, 
                                          const uint8_t* data, uint16_t size, uint32_t timeout) {
     // Check if initialized
-    if (!initialized) {
+    if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
@@ -1020,7 +1043,7 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     }
     
     // Lock the transfer mutex for thread safety
-    std::lock_guard<std::mutex> lock(transfer_mutex);
+    OS::lock_guard<OS::mutex> lock(transfer_mutex);
     
     // Get I2C registers
     auto i2c = GetI2CRegisters();
@@ -1029,17 +1052,17 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     }
     
     // Wait until bus is free
-    uint64_t start_time = timing_service.GetMilliseconds(); 
+    uint64_t start_time = timing_service->GetMilliseconds(); 
 
 
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if (timing_service.GetMilliseconds() - start_time > timeout) {
+        if (timing_service->GetMilliseconds() - start_time > timeout) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
     
     // Update transfer state
@@ -1055,13 +1078,13 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
 
     if (non_blocking && config.enable_interrupts) {
         // Wait until bus is free (this part is still blocking)
-        uint64_t start_time = timing_service.GetMilliseconds();
+        uint64_t start_time = timing_service->GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            timing_service.DelayMicroseconds(10);
+            timing_service->DelayMicroseconds(10);
             
             // Check for timeout with a reasonable default
-            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service->GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -1211,7 +1234,7 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
 Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, uint8_t mem_addr_size, 
                                         uint8_t* data, uint16_t size, uint32_t timeout) {
     // Check if initialized
-    if (!initialized) {
+    if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
     
@@ -1226,7 +1249,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     }
     
     // Lock the transfer mutex for thread safety
-    std::lock_guard<std::mutex> lock(transfer_mutex);
+    OS::lock_guard<OS::mutex> lock(transfer_mutex);
     
     // Get I2C registers
     auto i2c = GetI2CRegisters();
@@ -1248,7 +1271,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     transfer_state.data_buffer = data;
     transfer_state.data_size = size;
     transfer_state.timeout_ms = timeout;
-    transfer_state.start_time = timing_service.GetMilliseconds(); // For timeout tracking
+    transfer_state.start_time = timing_service->GetMilliseconds(); // For timeout tracking
     
     // Check if this is a non-blocking operation (timeout == 0)
     bool non_blocking = (timeout == 0);
@@ -1257,13 +1280,13 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     if (non_blocking && config.enable_interrupts) {
         // Wait until bus is free (this part is still blocking)
         // We could make this part non-blocking too with more state machine complexity
-        uint64_t start_time = timing_service.GetMilliseconds();
+        uint64_t start_time = timing_service->GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Short delay to prevent tight polling
-            timing_service.DelayMicroseconds(10, true);
+            timing_service->DelayMicroseconds(10);
             
             // Check for timeout with a reasonable default
-            if (timing_service.GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
+            if (timing_service->GetMilliseconds() - start_time > 100) { // 100ms timeout for bus availability
                 transfer_state.in_progress = false;
                 transfer_state.last_error = I2CError::Timeout;
                 return Platform::Status::TIMEOUT;
@@ -1288,17 +1311,17 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     // For blocking operations, use the polling approach
     
     // Wait until bus is free
-    uint64_t start_time = timing_service.GetMilliseconds();
+    uint64_t start_time = timing_service->GetMilliseconds();
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
         // Check for timeout
-        if (timing_service.GetMilliseconds() - start_time > timeout) {
+        if (timing_service->GetMilliseconds() - start_time > timeout) {
             transfer_state.in_progress = false;
             transfer_state.last_error = I2CError::Timeout;
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
     
     // Enable acknowledgement
@@ -1551,7 +1574,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
     }
     
     // Lock the transfer mutex for thread safety
-    std::lock_guard<std::mutex> lock(transfer_mutex);
+    OS::lock_guard<OS::mutex> lock(transfer_mutex);
     
     // Get I2C registers
     auto i2c = GetI2CRegisters();
@@ -1560,25 +1583,25 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
     }
     
     // Set timeout timestamp
-    uint64_t start_time = timing_service.GetMilliseconds();
+    uint64_t start_time = timing_service->GetMilliseconds();
     uint32_t end_time = start_time + timeout;
     
     // Try for the number of trials
     while (trials > 0) {
         // Check timeout
-        if (timing_service.GetMilliseconds() >= end_time) {
+        if (timing_service->GetMilliseconds() >= end_time) {
             return Platform::Status::TIMEOUT;
         }
         
         // Wait until bus is free
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
             // Check for timeout
-            if (timing_service.GetMilliseconds() >= end_time) {
+            if (timing_service->GetMilliseconds() >= end_time) {
                 return Platform::Status::TIMEOUT;
             }
             
             // Short delay to prevent tight polling
-            timing_service.DelayMicroseconds(10, true);
+            timing_service->DelayMicroseconds(10);
         }
         
         // Send START condition
@@ -1587,7 +1610,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
         // Wait for START to be generated (SB flag)
         while (!(i2c->SR1 & Platform::I2C::getBitValue(Platform::I2C::SR1::SB))) {
             // Check for timeout
-            if (timing_service.GetMilliseconds() >= end_time) {
+            if (timing_service->GetMilliseconds() >= end_time) {
                 return Platform::Status::TIMEOUT;
             }
         }
@@ -1599,7 +1622,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
         while (!(i2c->SR1 & (Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR) | 
                              Platform::I2C::getBitValue(Platform::I2C::SR1::AF)))) {
             // Check for timeout
-            if (timing_service.GetMilliseconds() >= end_time) {
+            if (timing_service->GetMilliseconds() >= end_time) {
                 // Generate STOP condition
                 i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::STOP);
                 return Platform::Status::TIMEOUT;
@@ -1618,7 +1641,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
             // Wait for STOP bit to be cleared
             while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
                 // Check for timeout
-                if (timing_service.GetMilliseconds() >= end_time) {
+                if (timing_service->GetMilliseconds() >= end_time) {
                     return Platform::Status::TIMEOUT;
                 }
             }
@@ -1636,7 +1659,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
             // Wait for STOP bit to be cleared
             while (i2c->CR1 & Platform::I2C::getBitValue(Platform::I2C::CR1::STOP)) {
                 // Check for timeout
-                if (timing_service.GetMilliseconds() >= end_time) {
+                if (timing_service->GetMilliseconds() >= end_time) {
                     return Platform::Status::TIMEOUT;
                 }
             }
@@ -1645,7 +1668,7 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
             trials--;
             
             // Short delay between trials
-            timing_service.DelayMilliseconds(10, true);
+            timing_service->DelayMilliseconds(10);
         }
     }
     
@@ -1697,7 +1720,7 @@ Platform::Status I2CInterface::RecoverBus() {
     };
     
     // Get the pin mapping for this I2C instance
-    const I2CPinMapping& pins = i2c_pins[instance - 1];
+    const I2CPinMapping& pins = i2c_pins[static_cast<uint8_t>(this->instance) - 1];
     
     // Get I2C registers
     auto i2c = GetI2CRegisters();
@@ -1735,32 +1758,32 @@ Platform::Status I2CInterface::RecoverBus() {
     // Set both lines high
     gpio.SetPin(scl_config.port, scl_config.pin);
     gpio.SetPin(sda_config.port, sda_config.pin);
-    timing_service.DelayMicroseconds(10);
+    timing_service->DelayMicroseconds(10);
     
     // Generate clock pulses to make slave release SDA line
     // Slave devices should release SDA after at most 9 clock cycles
     for (int i = 0; i < 9; i++) {
         // Pull SCL low
         gpio.ResetPin(scl_config.port, scl_config.pin);
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
         
         // Pull SCL high
         gpio.SetPin(scl_config.port, scl_config.pin);
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
     
     // Generate a STOP condition (SDA low to high while SCL is high)
     // First, ensure SCL is high
     gpio.SetPin(scl_config.port, scl_config.pin);
-    timing_service.DelayMicroseconds(10);
+    timing_service->DelayMicroseconds(10);
     
     // Pull SDA low
     gpio.ResetPin(sda_config.port, sda_config.pin);
-    timing_service.DelayMicroseconds(10);
+    timing_service->DelayMicroseconds(10);
     
     // Pull SDA high while SCL is high (STOP condition)
     gpio.SetPin(sda_config.port, sda_config.pin);
-    timing_service.DelayMicroseconds(10);
+    timing_service->DelayMicroseconds(10);
     
     // Reconfigure the pins for I2C mode
     scl_config.mode = Platform::GPIO::Mode::AlternateFunction;
@@ -1784,7 +1807,7 @@ Platform::Status I2CInterface::PollForStatus(uint32_t status_bit, bool set_state
         return Platform::Status::ERROR;
     }
     
-    uint64_t start_time = timing_service.GetMilliseconds(); // Convert to ms
+    uint64_t start_time = timing_service->GetMilliseconds(); // Convert to ms
     
     while (true) {
         // Check if the status bit is in the desired state
@@ -1794,12 +1817,12 @@ Platform::Status I2CInterface::PollForStatus(uint32_t status_bit, bool set_state
         }
         
         // Check for timeout
-        if (timing_service.GetMilliseconds() - start_time > timeout_ms) {
+        if (timing_service->GetMilliseconds() - start_time > timeout_ms) {
             return Platform::Status::TIMEOUT;
         }
         
         // Short delay to prevent tight polling
-        timing_service.DelayMicroseconds(10);
+        timing_service->DelayMicroseconds(10);
     }
 }
 
@@ -1821,9 +1844,9 @@ void I2CInterface::HandleError(I2CError error) {
 }
 
 // I2C interrupt handlers (Event)
-extern "C" void I2C1_EV_IRQHandler() {
+void I2C1_EV_IRQHandler() {
     // Get I2C instance
-    auto i2c_interface = I2CInterface::GetInstance(1);
+    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C1);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1832,9 +1855,9 @@ extern "C" void I2C1_EV_IRQHandler() {
     // Implement the interrupt handling logic here if needed
 }
 
-extern "C" void I2C2_EV_IRQHandler() {
+void I2C2_EV_IRQHandler() {
     // Get I2C instance
-    auto i2c_interface = I2CInterface::GetInstance(2);
+    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C2);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1843,9 +1866,9 @@ extern "C" void I2C2_EV_IRQHandler() {
     // Implement the interrupt handling logic here if needed
 }
 
-extern "C" void I2C3_EV_IRQHandler() {
+void I2C3_EV_IRQHandler() {
     // Get I2C instance
-    auto i2c_interface = I2CInterface::GetInstance(3);
+    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C3);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1855,9 +1878,9 @@ extern "C" void I2C3_EV_IRQHandler() {
 }
 
 // I2C interrupt handlers (Error)
-extern "C" void I2C1_ER_IRQHandler() {
+void I2C1_ER_IRQHandler() {
     // Get I2C instance
-    auto i2c_interface = I2CInterface::GetInstance(1);
+    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C1);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1866,9 +1889,9 @@ extern "C" void I2C1_ER_IRQHandler() {
     // Implement the error handling logic here if needed
 }
 
-extern "C" void I2C2_ER_IRQHandler() {
+void I2C2_ER_IRQHandler() {
     // Get I2C instance
-    auto i2c_interface = I2CInterface::GetInstance(2);
+    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C2);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1877,10 +1900,10 @@ extern "C" void I2C2_ER_IRQHandler() {
     // Implement the error handling logic here if needed
 }
 
-extern "C" void I2C3_ER_IRQHandler() {
+void I2C3_ER_IRQHandler() {
 
     // Get I2C instance
-    auto i2c_interface = I2CInterface::GetInstance(3);
+    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C3);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }

@@ -4,6 +4,14 @@
 
 namespace Platform {
     namespace I2C {
+
+        constexpr uint8_t I2C_INSTANCE_COUNT = 3;
+
+        enum class I2CInstance : uint8_t {
+            I2C1 = 1,
+            I2C2 = 2,
+            I2C3 = 3
+        };
         // I2C base addresses
         constexpr uint32_t I2C1_BASE = (APB1PERIPH_BASE + 0x5400UL);
         constexpr uint32_t I2C2_BASE = (APB1PERIPH_BASE + 0x5800UL);
@@ -127,11 +135,11 @@ namespace Platform {
         }
 
         // Helper function to get I2C registers by instance number
-        inline Registers* getI2C(uint8_t instance) {
+        inline Registers* getI2C(I2CInstance instance) {
             switch (instance) {
-                case 1: return getI2C1();
-                case 2: return getI2C2();
-                case 3: return getI2C3();
+                case I2CInstance::I2C1: return getI2C1();
+                case I2CInstance::I2C2: return getI2C2();
+                case I2CInstance::I2C3: return getI2C3();
                 default: return nullptr;
             }
         }

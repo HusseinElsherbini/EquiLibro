@@ -4,13 +4,12 @@
 #include "common/platform_rcc.hpp"
 #include "common/platform_flash.hpp"
 #include <memory>
-#include <mutex>
+#include "os/mutex.hpp"
 namespace Platform {
 namespace RCC {
 
-    // Static instance
-static std::shared_ptr<RccInterface> rcc_instance = nullptr;
-static std::mutex instance_mutex;
+
+static OS::mutex instance_mutex;
 // Constructor
 RccInterface::RccInterface() 
     : initialized(false), 
@@ -760,34 +759,30 @@ Platform::Status RccInterface::DisablePeripheralClock(Platform::RCC::RccPeripher
     RccBusType bus = it->second.bus;
     uint8_t bitPos = it->second.bitPosition;
     
-    uint32_t periph_val = static_cast<uint32_t>(peripheral);
-    uint8_t bus = (periph_val >> 8) & 0xFF;
-    uint8_t periph_bit = periph_val & 0xFF;
-    
     // Disable the appropriate clock
     switch (bus) {
         case RccBusType::AHB1:  // AHB1
 
             Platform::clearBit(rcc->AHB1ENR, (1UL << bitPos));
-            enabledPeripheralsAHB1 &= ~(1 << static_cast<uint8_t>(periph_bit - 1));
+            enabledPeripheralsAHB1 &= ~(1 << static_cast<uint8_t>(bitPos - 1));
             break;
         
         case RccBusType::AHB2:  // AHB2
 
             Platform::clearBit(rcc->AHB2ENR, (1UL << bitPos));
-            enabledPeripheralsAHB2 &= ~(1 << static_cast<uint8_t>(periph_bit - 1));
+            enabledPeripheralsAHB2 &= ~(1 << static_cast<uint8_t>(bitPos - 1));
             break;
 
         case RccBusType::APB1:  // APB1
 
             Platform::clearBit(rcc->APB1ENR, (1UL << bitPos));
-            enabledPeripheralsAPB1 &= ~(1 << static_cast<uint8_t>(periph_bit - 1));
+            enabledPeripheralsAPB1 &= ~(1 << static_cast<uint8_t>(bitPos - 1));
             break;
 
         case RccBusType::APB2:  // APB2
 
             Platform::clearBit(rcc->APB2ENR, (1UL << bitPos));
-            enabledPeripheralsAPB2 &= ~(1 << static_cast<uint8_t>(periph_bit - 1));
+            enabledPeripheralsAPB2 &= ~(1 << static_cast<uint8_t>(bitPos - 1));
             break;
 
         default:
@@ -797,5 +792,6 @@ Platform::Status RccInterface::DisablePeripheralClock(Platform::RCC::RccPeripher
         }
     
     return Platform::Status::OK;
+}
 }
 }

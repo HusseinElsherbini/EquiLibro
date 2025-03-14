@@ -5,12 +5,12 @@
 #include <vector>
 #include <mutex>
 #include <memory>
-
+#include "os/mutex.hpp"
 namespace Platform {
 namespace TIM {
-// Static instance management with shared_ptr
-static std::vector<std::weak_ptr<TimerInterface>> timer_instances(Platform::TIM::TIM_CHANNEL_COUNT);
-static std::mutex timer_instances_mutex;
+
+
+static OS::mutex timer_instances_mutex;
 
 // Constructor with timer type detection
 TimerInterface::TimerInterface(TimerInstance instance) 
@@ -53,9 +53,9 @@ TimerInterface& TimerInterface::GetInstance(uint8_t instance) {
     // Convert to zero-based index
     size_t index = instance - 1;
     
-    std::lock_guard<std::mutex> lock(timer_instances_mutex);
+    OS::lock_guard<OS::mutex> lock(timer_instances_mutex);
     
-    // Replace dynamic vector with static array of actual instances
+    // static array of actual instances
     static TimerInterface instances[TIM_CHANNEL_COUNT] = {
         TimerInterface(TimerInstance::TIM1), TimerInterface(TimerInstance::TIM2), TimerInterface(TimerInstance::TIM3),
         TimerInterface(TimerInstance::TIM4), TimerInterface(TimerInstance::TIM5), TimerInterface(TimerInstance::TIM9),

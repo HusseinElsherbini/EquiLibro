@@ -8,6 +8,38 @@ namespace Platform {
     namespace CMSIS {
         // CMSIS register definitions for STM32F4
 
+        
+        namespace SCB {
+            // System Control Block register structure
+            struct Registers {
+                volatile uint32_t CPUID;        // CPUID Base Register
+                volatile uint32_t ICSR;         // Interrupt Control and State Register
+                volatile uint32_t VTOR;         // Vector Table Offset Register
+                volatile uint32_t AIRCR;        // Application Interrupt and Reset Control Register
+                volatile uint32_t SCR;          // System Control Register
+                volatile uint32_t CCR;          // Configuration Control Register
+                volatile uint8_t  SHP[12];      // System Handlers Priority Registers (8-bit)
+                volatile uint32_t SHCSR;        // System Handler Control and State Register
+                volatile uint32_t CFSR;         // Configurable Fault Status Register
+                volatile uint32_t HFSR;         // HardFault Status Register
+                volatile uint32_t DFSR;         // Debug Fault Status Register
+                volatile uint32_t MMFAR;        // MemManage Fault Address Register
+                volatile uint32_t BFAR;         // BusFault Address Register
+                volatile uint32_t AFSR;         // Auxiliary Fault Status Register
+                volatile uint32_t PFR[2];       // Processor Feature Register
+                volatile uint32_t DFR;          // Debug Feature Register
+                volatile uint32_t ADR;          // Auxiliary Feature Register
+                volatile uint32_t MMFR[4];      // Memory Model Feature Register
+                volatile uint32_t ISAR[5];      // Instruction Set Attributes Register
+                uint32_t RESERVED0[5];
+                volatile uint32_t CPACR;        // Coprocessor Access Control Register
+            };
+
+            // Access function for SCB registers
+            inline Registers* getRegisters() {
+                return reinterpret_cast<Registers*>(SCB_BASE);
+            }
+        }        
         //  NVIC name space
         namespace NVIC {
             // IRQ numbers for STM32F4 - used by hardware abstraction layer
@@ -133,37 +165,7 @@ namespace Platform {
         }
         
         // SCB name space
-        namespace SCB {
-            // System Control Block register structure
-            struct Registers {
-                volatile uint32_t CPUID;        // CPUID Base Register
-                volatile uint32_t ICSR;         // Interrupt Control and State Register
-                volatile uint32_t VTOR;         // Vector Table Offset Register
-                volatile uint32_t AIRCR;        // Application Interrupt and Reset Control Register
-                volatile uint32_t SCR;          // System Control Register
-                volatile uint32_t CCR;          // Configuration Control Register
-                volatile uint8_t  SHP[12];      // System Handlers Priority Registers (8-bit)
-                volatile uint32_t SHCSR;        // System Handler Control and State Register
-                volatile uint32_t CFSR;         // Configurable Fault Status Register
-                volatile uint32_t HFSR;         // HardFault Status Register
-                volatile uint32_t DFSR;         // Debug Fault Status Register
-                volatile uint32_t MMFAR;        // MemManage Fault Address Register
-                volatile uint32_t BFAR;         // BusFault Address Register
-                volatile uint32_t AFSR;         // Auxiliary Fault Status Register
-                volatile uint32_t PFR[2];       // Processor Feature Register
-                volatile uint32_t DFR;          // Debug Feature Register
-                volatile uint32_t ADR;          // Auxiliary Feature Register
-                volatile uint32_t MMFR[4];      // Memory Model Feature Register
-                volatile uint32_t ISAR[5];      // Instruction Set Attributes Register
-                uint32_t RESERVED0[5];
-                volatile uint32_t CPACR;        // Coprocessor Access Control Register
-            };
 
-            // Access function for SCB registers
-            inline Registers* getRegisters() {
-                return reinterpret_cast<Registers*>(SCB_BASE);
-            }
-        }
         
         // SysTick name space
         namespace SysTick {

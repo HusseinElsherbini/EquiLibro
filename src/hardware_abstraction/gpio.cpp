@@ -47,7 +47,7 @@ Platform::Status GpioInterface::ConfigPin(const Platform::GPIO::GpioConfig& conf
     }
 
     // Enable clock to GPIO port using RCC interface
-    std::shared_ptr<Platform::RCC::RccInterface> rcc = Platform::RCC::RccInterface::GetInstance();
+    Platform::RCC::RccInterface* rcc = &Platform::RCC::RccInterface::GetInstance();
 
     if (rcc == nullptr) {
         return Platform::Status::ERROR;

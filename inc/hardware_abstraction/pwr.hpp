@@ -5,7 +5,7 @@
 #include "common/platform.hpp"
 #include "common/platform_pwr.hpp"
 #include <memory>
-#include <mutex>
+#include "os/mutex.hpp"
 
 namespace Platform {
 namespace PWR {
@@ -128,12 +128,15 @@ class PowerInterfaceImpl : public PowerInterface {
         // Internal state tracking
         bool initialized;
         PowerConfig config;
-    
+
+        // Private constructor for singleton pattern
+        PowerInterfaceImpl();
+        
         // Grant access to the GetInstance method
         friend PowerInterface& PowerInterface::GetInstance();
         
         // Mutex for thread safety
-        std::mutex power_mutex;
+        OS::mutex power_mutex;
         
         // Callback table
         struct CallbackEntry {
@@ -143,10 +146,7 @@ class PowerInterfaceImpl : public PowerInterface {
         };
         
         CallbackEntry callbacks[static_cast<size_t>(PowerEvent::Max)];
-        
-        // Private constructor for singleton pattern
-        PowerInterfaceImpl();
-        
+          
         // Deleted copy constructor and assignment operator
         PowerInterfaceImpl(const PowerInterfaceImpl&) = delete;
         PowerInterfaceImpl& operator=(const PowerInterfaceImpl&) = delete;

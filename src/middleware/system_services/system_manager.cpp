@@ -478,11 +478,11 @@ Platform::Status SystemManagerImpl::SetPowerMode(Platform::PWR::PowerMode mode) 
     
     // Only implement the modes that are supported on STM32F401
     switch (mode) {
-        case PowerMode::Run:
+        case PowerMode::Run: {
             // Normal run mode - exit any low power modes
             // Implementation depends on the current mode
             break;
-            
+        }
         case PowerMode::LowPower:
             // Low power run mode - reduce clock frequency
             // Requires VOS bit in PWR_CR register
@@ -502,12 +502,12 @@ Platform::Status SystemManagerImpl::SetPowerMode(Platform::PWR::PowerMode mode) 
             }
             break;
             
-        case PowerMode::Sleep:
+        case PowerMode::Sleep:{
             // Execute WFI (Wait For Interrupt) instruction
             __asm volatile("wfi");
             return Platform::Status::OK;
-            
-        case PowerMode::DeepSleep:
+        }
+        case PowerMode::DeepSleep:{
             // Set SLEEPDEEP bit in System Control Register
             Platform::CMSIS::SCB::getRegisters()->SCR |= (1 << 2);
             
@@ -517,8 +517,8 @@ Platform::Status SystemManagerImpl::SetPowerMode(Platform::PWR::PowerMode mode) 
             // Clear SLEEPDEEP bit after waking up
             Platform::CMSIS::SCB::getRegisters()->SCR &= ~(1 << 2);
             return Platform::Status::OK;
-            
-        case PowerMode::Standby:
+        }
+        case PowerMode::Standby:{
             // Set SLEEPDEEP bit and PDDS bit
             Platform::CMSIS::SCB::getRegisters()->SCR |= (1 << 2); // SLEEPDEEP
             
@@ -529,7 +529,7 @@ Platform::Status SystemManagerImpl::SetPowerMode(Platform::PWR::PowerMode mode) 
             // Execute WFI instruction
             __asm volatile("wfi");
             return Platform::Status::OK;
-            
+        }
         default:
             return Platform::Status::NOT_SUPPORTED;
     }

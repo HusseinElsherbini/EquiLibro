@@ -7,7 +7,7 @@
 #include "hardware_abstraction/timer.hpp"
 #include <functional>
 #include <vector>
-#include <mutex>
+#include "os/mutex.hpp"
 #include <atomic>
 
 namespace Middleware {
@@ -82,7 +82,7 @@ private:
     // Timer callback management
     std::vector<TimerHandle> timers;
     uint32_t next_timer_id;
-    std::mutex timer_mutex;
+    OS::mutex timer_mutex;
     
     // Delay state tracking
     struct DelayState {

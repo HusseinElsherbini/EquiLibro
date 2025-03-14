@@ -269,7 +269,7 @@ bool SysTickInterface::HasTimeoutOccurred(uint64_t timeout) const {
 
 // SysTick interrupt handler
 // This should be called from the SysTick_Handler() in startup code
-extern "C" void SysTick_IRQHandler(void) {
+void SysTick_Handler(void) {
     // Get the singleton instance safely
     auto systick_instance = &SysTickInterface::GetInstance();    
     // Check if the instance exists and is valid before using it

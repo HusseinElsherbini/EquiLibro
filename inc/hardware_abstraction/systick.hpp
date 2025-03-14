@@ -5,7 +5,9 @@
 #include "common/platform_cmsis.hpp"
 #include <memory>
 #include <mutex>
+#include <atomic>
 
+extern "C" void SysTick_IRQHandler(void);
 namespace Platform {
 namespace CMSIS {
 namespace SysTick {
@@ -54,6 +56,8 @@ private:
     
 public:
 
+    SysTickInterface();
+    ~SysTickInterface();
     // Interface implementation
     Status Init(void* config) override;
     Status DeInit() override;
@@ -70,7 +74,7 @@ public:
     bool HasTimeoutOccurred(uint64_t timeout) const;
     
     // Allow SysTick_IRQHandler to access private state
-    friend void SysTick_IRQHandler(void);
+    friend void SysTick_Handler(void);
     
     // Singleton pattern for SysTick interface (only need one instance)
     static SysTickInterface& GetInstance();
