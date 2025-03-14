@@ -76,7 +76,7 @@ private:
     uint32_t ticks_per_ms;
     
     // Timestamp tracking
-    std::atomic<uint64_t> microsecond_counter;
+    std::atomic<uint32_t> microsecond_counter;
     uint32_t last_timer_count;
     bool timer_wrapped;
     

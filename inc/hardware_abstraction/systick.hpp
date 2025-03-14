@@ -40,7 +40,7 @@ private:
     // Internal state tracking
     bool initialized;
     SysTickConfig config;
-    std::atomic<uint64_t> tick_count;
+    std::atomic<uint32_t> tick_count;
     uint32_t tick_frequency;
     
     // Callback table

@@ -7,10 +7,12 @@ build/
 *.bin
 *.map
 *.lst
+out/
 
 # IDE files
 .vscode/
 .idea/
+
 *.swp
 *~
 
@@ -27,3 +29,5 @@ build/
 # System files
 .DS_Store
 Thumbs.db
+*.jdebug
+*.jdebug.user

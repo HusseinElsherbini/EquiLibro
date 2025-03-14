@@ -8,10 +8,23 @@
 namespace Platform {
 namespace FLASH {
 
-FlashInterface& GetInstance() {
+FlashInterface& FlashInterface::GetInstance() {
     // Static instance of the interface, created on first use
     static FlashInterfaceImpl instance;
     return instance;
+}
+
+Platform::FLASH::FlashInterfaceImpl::FlashInterfaceImpl() 
+    : initialized(false), locked(true) {
+    // Constructor implementation
+
+    
+    // Initialize callbacks
+    for (auto& callback : callbacks) {
+        callback.callback = nullptr;
+        callback.user_data = nullptr;
+        callback.active = false;
+    }
 }
 // Destructor
 FlashInterfaceImpl::~FlashInterfaceImpl() {

@@ -40,6 +40,93 @@ SystemConfigurator SystemConfigurator::FromProfile(Profile profile) {
     return configurator;
 }
 
+SystemConfigurator& SystemConfigurator::enablePrefetch(bool enable) {
+    config.FlashConfig.prefetch_enable = enable;
+    return *this;
+}
+
+SystemConfigurator& SystemConfigurator::enableDataCache(bool enable) {
+    config.FlashConfig.dcache_enable = enable;
+    return *this;
+}
+
+SystemConfigurator& SystemConfigurator::enableSysTick(bool enable) {
+    config.enableSysTick = enable;
+    return *this;
+}
+
+SystemConfigurator& SystemConfigurator::withSysTickInterval(uint32_t intervalMicroseconds) {
+    config.sysTickInterval = intervalMicroseconds;
+    return *this;
+}
+void SystemConfigurator::validatePowerSettings() {
+    // Validate power mode settings
+    
+    // Check if power mode is valid
+    if (config.PowerConfig.power_mode != Platform::PWR::PowerMode::Run &&
+        config.PowerConfig.power_mode != Platform::PWR::PowerMode::LowPower &&
+        config.PowerConfig.power_mode != Platform::PWR::PowerMode::Sleep &&
+        config.PowerConfig.power_mode != Platform::PWR::PowerMode::DeepSleep &&
+        config.PowerConfig.power_mode != Platform::PWR::PowerMode::Standby) {
+        // Default to Run mode if invalid
+        config.PowerConfig.power_mode = Platform::PWR::PowerMode::Run;
+    }
+    
+    // Ensure voltage scale is compatible with power mode
+    if (config.PowerConfig.power_mode == Platform::PWR::PowerMode::LowPower) {
+        // In low power mode, scale 3 (lowest power) is recommended
+        // If currently set to a higher power scale, adjust it
+        if (config.PowerConfig.voltage_scale == Platform::PWR::VoltageScale::Scale1) {
+            config.PowerConfig.voltage_scale = Platform::PWR::VoltageScale::Scale3;
+        }
+    } else if (config.PowerConfig.power_mode == Platform::PWR::PowerMode::Run) {
+        // In run mode with high frequency, scale 1 (highest performance) may be needed
+        // Check if clock frequency is high and adjust voltage scale if needed
+        if (config.SysClockConfig.systemClockHz > 60000000 && 
+            config.PowerConfig.voltage_scale != Platform::PWR::VoltageScale::Scale1) {
+            config.PowerConfig.voltage_scale = Platform::PWR::VoltageScale::Scale1;
+        }
+    }
+    
+    // Check backup regulator settings for standby mode
+    if (config.PowerConfig.power_mode == Platform::PWR::PowerMode::Standby) {
+        // In standby mode, you might want to ensure backup regulator settings
+        // are appropriate for maintaining backup domain
+        if (config.PowerConfig.backup_domain_write_enable) {
+            // Allow backup domain writes for configuration
+        }
+    }
+    
+    // Validate wakeup pin configurations if in sleep, deep sleep, or standby modes
+    if (config.PowerConfig.power_mode == Platform::PWR::PowerMode::Sleep ||
+        config.PowerConfig.power_mode == Platform::PWR::PowerMode::DeepSleep ||
+        config.PowerConfig.power_mode == Platform::PWR::PowerMode::Standby) {
+        // At least one wakeup source should be enabled for these modes
+        // Otherwise, the system might not be able to wake up
+        bool any_wakeup_enabled = false;
+        for (int i = 0; i < 3; i++) {
+            if (config.PowerConfig.wakeup_pin_config[i]) {
+                any_wakeup_enabled = true;
+                break;
+            }
+        }
+        
+        // If no wakeup pin is enabled and we're entering a mode that needs one,
+        // enable at least one wakeup source (WKUP1 by default)
+        if (!any_wakeup_enabled && 
+            config.PowerConfig.power_mode == Platform::PWR::PowerMode::Standby) {
+            config.PowerConfig.wakeup_pin_config[0] = true;
+        }
+    }
+    
+    // PVD (Power Voltage Detector) validation
+    if (config.PowerConfig.pvd_enable) {
+        // Ensure PVD level is within valid range (0-7)
+        if (config.PowerConfig.pvd_level > 7) {
+            config.PowerConfig.pvd_level = 7;
+        }
+    }
+}
 SystemConfigurator SystemConfigurator::FromExistingConfig(const SystemInitConfig& existingConfig) {
     SystemConfigurator configurator;
     configurator.config = existingConfig;

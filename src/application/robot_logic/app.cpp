@@ -3,6 +3,11 @@
 
 namespace APP {
 
+
+constexpr uint32_t APP::GpioToggleApp::EVENT_ERROR;
+constexpr uint32_t APP::GpioToggleApp::EVENT_PIN_TOGGLED;
+
+
 GpioToggleApp::GpioToggleApp()
     : current_state(AppState::Initializing),
       is_pin_high(false),

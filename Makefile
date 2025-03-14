@@ -88,10 +88,10 @@ ASFLAGS := $(CPU_FLAGS) -c -x assembler-with-cpp $(INC_PATHS)
 
 # Linker flags
 LDFLAGS := $(CPU_FLAGS) --specs=nano.specs -T scripts/linker/stm32_ls.ld \
-           -Wl,-Map=$(OUTPUT_DIR)/$(PROJ_NAME).map -Wl,--gc-sections
+           -Wl,-Map=$(OUTPUT_DIR)/$(PROJ_NAME).map -Wl,--gc-sections 
 
 # Libraries to be linked
-LIBS := -lm -lc -lgcc
+LIBS := -lm -lc -lgcc 
 
 # Source directories with expanded structure
 HW_ABSTRACTION_DIR := src/hardware_abstraction

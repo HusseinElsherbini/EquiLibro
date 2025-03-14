@@ -31,7 +31,7 @@ SysTickInterface::~SysTickInterface() {
 }
 
 // Singleton pattern implementation
-static SysTickInterface& GetInstance() {
+SysTickInterface& SysTickInterface::GetInstance() {
 
     static SysTickInterface systick_instance;
     return  systick_instance;
