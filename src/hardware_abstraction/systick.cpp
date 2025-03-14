@@ -274,7 +274,7 @@ void SysTick_Handler(void) {
     auto systick_instance = &SysTickInterface::GetInstance();    
     // Check if the instance exists and is valid before using it
     if (systick_instance) {
-        // Increment tick count - access through the shared_ptr
+        // Increment tick count 
         systick_instance->tick_count.fetch_add(1, std::memory_order_relaxed); // atomic increment
         
         // Check if callbacks array is initialized and the specific callback exists

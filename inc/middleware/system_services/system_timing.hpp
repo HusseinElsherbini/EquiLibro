@@ -3,6 +3,7 @@
 #pragma once
 
 #include "common/platform.hpp"
+#include "common/platform_tim.hpp"
 #include "middleware/middleware_module.hpp"
 #include "hardware_abstraction/timer.hpp"
 #include <functional>
@@ -45,8 +46,8 @@ enum class TimeUnit {
  * @brief Configuration structure for system timing
  */
 struct SystemTimingConfig {
-    uint8_t high_precision_timer;     // Timer instance to use for high-precision timing
-    uint32_t timer_frequency;         // Timer clock frequency in Hz
+    Platform::TIM::TimerInstance instance;
+    uint32_t timer_input_clk_freq;         // Timer clock frequency in Hz
     bool use_rtos_timing;             // Whether to use RTOS timing when available
     bool enable_power_saving;         // Enable power saving features
 };

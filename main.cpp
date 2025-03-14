@@ -1,32 +1,72 @@
-/**
- * @file main.cpp
- * @brief Main entry point for the self-balancing robot application
- * 
- * This file initializes the system hardware, middleware services, and
- * application modules, then runs the main control loop.
- * 
- * @author Your Name
- * @date Created: 2025-03-13
- */
+// src/main.cpp
 
-// C++ standard includes
-#include <cstdint>
-#include <memory>
-
-// System includes
-#include "common/platform.hpp"
+#include "application/robot_logic/app.hpp"
+#include "middleware/utils/system_configurator.hpp"
+#include "middleware/system_services/system_manager.hpp"
+#include "middleware/system_services/system_timing.hpp"
+#include "hardware_abstraction/gpio.hpp"
 
 
-/**
- * @brief Main application entry point
- * @return int - Exit code (should never return in embedded applications)
- */
+// Global instances
+static APP::GpioToggleApp gpio_toggle_app;
+
 int main() {
+    // Configure the system using SystemConfigurator
+    auto system_config = Middleware::SystemServices::SystemConfigurator()
+        .withSystemClock(84000000)       // 84 MHz
+        .enablePrefetch()                // Enable flash prefetch
+        .enableInstructionCache()        // Enable instruction cache
+        .enableDataCache()               // Enable data cache
+        .withPowerMode(Platform::PWR::PowerMode::Run)
+        .enableSysTick(true)
+        .withSysTickInterval(1000)       // 1ms interval
+        .build();
     
+    // Initialize system with the configuration
+    auto& system_manager = Middleware::SystemServices::SystemManager::GetInstance();
     
-    while(1);
-    // We should never reach here in an embedded application
+    Platform::Status status = system_manager.Init(&system_config);
+    
+    if(status != Platform::Status::OK) {
+
+        // failed intializing system manager
+        while(1);
+    }
+
+    // Configure PB13 as toggle led
+    APP::GpioToggleConfig gpio_toggle_config = {
+
+        .gpio_port = Platform::GPIO::Port::PORTB,
+        .gpio_pin = 13,
+        .toggle_interval_ms = 1000,
+        .start_state = true,
+    };
+    // Get system services
+    auto& timing_service = Middleware::SystemServices::SystemTiming::GetInstance();
+
+    Middleware::SystemServices::SystemTimingConfig time_service_config = {
+
+        .instance = Platform::TIM::TimerInstance::TIM5,
+        .timer_input_clk_freq = 84000000,
+    };
+
+    status = timing_service.Init(&time_service_config); 
+    if(status != Platform::Status::OK) {
+
+        // failed intializing system manager
+        while(1);
+    }
+
+    // initialize application 
+    gpio_toggle_app.Init(&gpio_toggle_config);
+
+    // Should never reach here
+    while (1) {
+        // Infinite loop
+    }
+    
     return 0;
 }
+
 
 

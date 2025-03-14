@@ -72,18 +72,18 @@ Platform::Status SystemTiming::Init(void* config) {
     
     // Get a timer for high-precision timing
     // TIM2 or TIM5 are 32-bit timers which are ideal for this purpose
-    precision_timer = &TimerInterface::GetInstance(this->config.high_precision_timer);
+    this->precision_timer = &TimerInterface::GetInstance(this->config.instance);
     
     // Configure the timer for microsecond precision
     TimerConfig timer_config = {};
-    timer_config.timerInstance = this->config.high_precision_timer;
+    timer_config.timerInstance = this->config.instance;
     timer_config.mode = Platform::TIM::Mode::Basic;
     timer_config.direction = Platform::TIM::Direction::Up;
     timer_config.alignment = Platform::TIM::Alignment::Edge;
     
     // Calculate the prescaler to get microsecond resolution
     // For example, if the timer clock is 84MHz, we need a prescaler of 84 to get 1MHz timer frequency
-    uint32_t timer_clock = this->config.timer_frequency;
+    uint32_t timer_clock = this->config.timer_input_clk_freq;
     timer_config.prescaler = timer_clock / 1000000UL - 1; // Prescaler for 1MHz (1us resolution)
     timer_config.period = 0xFFFFFFFF; // Maximum period for a 32-bit timer
     timer_config.autoReloadPreload = true;

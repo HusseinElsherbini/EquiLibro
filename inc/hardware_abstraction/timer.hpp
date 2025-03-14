@@ -99,7 +99,7 @@ struct TimerStatus {
     uint32_t capture_values[4];  // Capture values for up to 4 channels
 };
 struct TimerConfig {
-    uint8_t timerInstance;             // Timer instance (1-5)
+    TimerInstance timerInstance;             // Timer instance (1-5)
     Mode mode;                    // Timer operating mode
     ClockDivision clockDivision;  // Clock division
     Direction direction;          // Count direction
@@ -207,7 +207,7 @@ public:
     TimerType GetTimerType() const;
     
     // Safe singleton factory
-    static TimerInterface& GetInstance(uint8_t instance);
+    static TimerInterface& GetInstance(TimerInstance instance);
     
 };
 

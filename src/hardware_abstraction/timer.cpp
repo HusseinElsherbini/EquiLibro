@@ -42,16 +42,16 @@ TimerInterface::~TimerInterface() {
     }
 }
 
-// Safe singleton factory with shared_ptr
+// Safe singleton factory 
 // Replace the implementation in timer.cpp:
-TimerInterface& TimerInterface::GetInstance(uint8_t instance) {
+TimerInterface& TimerInterface::GetInstance(TimerInstance instance) {
     if (!Platform::TIM::isValidTimerInstance(instance)) {
         // Since we can't return nullptr with references, default to timer 1
-        instance = 1;
+        instance = TimerInstance::TIM1;
     }
     
     // Convert to zero-based index
-    size_t index = instance - 1;
+    size_t index = static_cast<uint8_t>(instance) - 1;
     
     OS::lock_guard<OS::mutex> lock(timer_instances_mutex);
     

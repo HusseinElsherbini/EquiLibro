@@ -509,10 +509,10 @@ namespace TIM {
     }
     
     // Function to check if a timer instance is valid
-    inline bool isValidTimerInstance(uint8_t instance) {
-        return (instance == 1) || 
-            (instance >= 2 && instance <= 5) || 
-            (instance >= 9 && instance <= 11);
+    inline bool isValidTimerInstance(TimerInstance instance) {
+        return (instance == TimerInstance::TIM1) || 
+            (instance >= TimerInstance::TIM2 && instance <= TimerInstance::TIM5) || 
+            (instance >= TimerInstance::TIM9 && instance <= TimerInstance::TIM11);
     }
     
     // Function to get number of channels supported by timer instance
