@@ -32,9 +32,9 @@ extern "C" {
 	void MemManage_Handler 				(void) __attribute__ ((weak, alias("Default_Handler")));
 	void BusFault_Handler 				(void) __attribute__ ((weak, alias("Default_Handler")));
 	void UsageFault_Handler 			(void) __attribute__ ((weak, alias("Default_Handler")));
-	void vPortSVCHandler 				(void) __attribute__ ((weak, alias("Default_Handler")));
+	void SVC_Handler    				(void) __attribute__ ((weak, alias("Default_Handler")));
 	void DebugMon_Handler 				(void) __attribute__ ((weak, alias("Default_Handler")));
-	void xPortPendSVHandler   			(void) __attribute__ ((weak, alias("Default_Handler")));
+	void PendSV_Handler      			(void) __attribute__ ((weak, alias("Default_Handler")));
 	void SysTick_Handler  				(void) __attribute__ ((weak, alias("Default_Handler")));
 	void WWDG_IRQHandler 				(void) __attribute__ ((weak, alias("Default_Handler")));
 	void PVD_IRQHandler 				(void) __attribute__ ((weak, alias("Default_Handler")));             
@@ -106,10 +106,10 @@ extern "C" {
 		0,
 		0,
 		0,
-		(uint32_t)vPortSVCHandler,
+		(uint32_t)SVC_Handler,
 		(uint32_t)DebugMon_Handler,   
 		0,
-		(uint32_t)xPortPendSVHandler,
+		(uint32_t)PendSV_Handler,
 		(uint32_t)SysTick_Handler,
 		(uint32_t)WWDG_IRQHandler,
 		(uint32_t)PVD_IRQHandler,         
@@ -218,9 +218,9 @@ extern "C" {
 		for(uint32_t i = 0; i < size; i++) {
 			*pDst++ = 0;
 		}
-		// Initialize your heap management here if needed
+		// Initialize management here if needed
 		// Set up the heap (if using dynamic memory)
-		// This might be important if your constructors use "new"
+		// This is important if constructors use "new"
 		extern unsigned int __HeapBase;
 		extern unsigned int __HeapLimit;
 

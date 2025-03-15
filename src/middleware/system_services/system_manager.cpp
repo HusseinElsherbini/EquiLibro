@@ -934,30 +934,39 @@ Platform::Status SystemManagerImpl::ConfigureMPU() {
 
 // Configure FPU if enabled
 Platform::Status SystemManagerImpl::ConfigureFPU() {
+    // Early return if FPU is disabled in configuration
     if (!config.enableFPU) {
         return Platform::Status::OK;
     }
+
+    // Access CPACR directly at its known address in the Cortex-M4 memory map
+    // CPACR is at address 0xE000ED88 in the SCB region
+    volatile uint32_t* cpacr = reinterpret_cast<volatile uint32_t*>(0xE000ED88);
     
-    // We should ideally have an FPU interface, but if not available,
-    // we can create a system register interface function that's more consistent
+    // Read current register value
+    uint32_t cpacr_value = *cpacr;
     
-    auto fpu_regs = Platform::CMSIS::FPU::getRegisters(); // CPACR register address
-    uint32_t cpacr_value = 0;
+    // Enable CP10 and CP11 (FPU) access for both privileged and user mode
+    // Setting bits 20-23: CP10 uses bits 20-21, CP11 uses bits 22-23
+    // Value of 3 (0b11) gives full access in both modes
+    cpacr_value |= ((3UL << 20) | (3UL << 22));
     
-    // Read current value
-    ReadSystemRegister(reinterpret_cast<uintptr_t>(&(fpu_regs->CPACR)), cpacr_value);
+    // Write the modified value back to the register
+    *cpacr = cpacr_value;
     
-    // Enable CP10 and CP11 (FPU) access for privileged and user mode
-    cpacr_value |= ((3UL << 10 * 2) | (3UL << 11 * 2));
-    
-    // Write updated value
-    WriteSystemRegister(reinterpret_cast<uintptr_t>(&(fpu_regs->CPACR)), cpacr_value);
-    
+    // Memory barriers ensure all memory accesses complete before continuing
     // Make sure changes are applied
-    __asm volatile("DSB");
-    __asm volatile("ISB");
+    asm volatile("DSB");
+    asm volatile("ISB");
     
-    // Update system state
+    // Additional FPU initialization: Set default mode
+    // These registers help control FPU behavior
+    
+    // FPSCR - Floating-Point Status and Control Register - default to 0
+    // This clears any exception flags and sets the default rounding mode
+    *reinterpret_cast<volatile uint32_t*>(0xE000EF34) = 0;
+    
+    // Update system state to reflect FPU availability
     system_state.fpuEnabled = true;
     
     return Platform::Status::OK;

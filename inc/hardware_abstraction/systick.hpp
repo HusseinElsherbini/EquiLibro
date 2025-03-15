@@ -7,7 +7,8 @@
 #include <mutex>
 #include <atomic>
 
-extern "C" void SysTick_IRQHandler(void);
+// Forward declaration of handler with C linkage
+extern "C" void SysTick_Handler(void);
 namespace Platform {
 namespace CMSIS {
 namespace SysTick {
@@ -74,7 +75,7 @@ public:
     bool HasTimeoutOccurred(uint64_t timeout) const;
     
     // Allow SysTick_IRQHandler to access private state
-    friend void SysTick_Handler(void);
+    friend void ::SysTick_Handler(void);
     
     // Singleton pattern for SysTick interface (only need one instance)
     static SysTickInterface& GetInstance();

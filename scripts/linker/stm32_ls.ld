@@ -6,6 +6,8 @@ MEMORY
   SRAM(rwx):ORIGIN =0x20000000,LENGTH =64K
 }
 
+_Min_Heap_Size = 0x4000;  /* 16KB minimum guarantee for heap */
+_Min_Stack_Size = 0x2000; /* 8KB minimum guarantee for stack */
 
 SECTIONS
 {
@@ -63,6 +65,23 @@ SECTIONS
 	end = .;
 	__end__ = .;
   }> SRAM
-  
+
+  .heap :
+  {
+      . = ALIGN(8);
+      PROVIDE ( end = . );
+      PROVIDE ( _end = . );
+      . = . + _Min_Heap_Size;
+      PROVIDE ( _heap_end = . );
+      . = ALIGN(8);
+  } >SRAM
+
+  .stack :
+  {
+      . = ALIGN(8);
+      . = . + _Min_Stack_Size;
+      . = ALIGN(8);
+      PROVIDE( _estack = . );
+  } >SRAM
 
 }

@@ -39,7 +39,11 @@ Platform::Status SystemInit() {
     if(status != Platform::Status::OK) {
         return status;
     }
-    
+    return Platform::Status::OK;
+}
+
+Platform::Status app_init() {
+
     // Now that hardware is initialized, configure the application
     APP::GpioToggleConfig gpio_toggle_config = {
         .gpio_port = Platform::GPIO::Port::PORTB,
@@ -52,8 +56,8 @@ Platform::Status SystemInit() {
     
     // Initialize the application with hardware-dependent operations
     return g_gpio_toggle_app->Init(&gpio_toggle_config);
-}
 
+}
 int main() {
     // Initialize system and application
     Platform::Status status = SystemInit();
@@ -64,9 +68,19 @@ int main() {
             // Perhaps blink an error code on an LED
         }
     }
-    
+    status = app_init();
+
+    if(status != Platform::Status::OK) {
+        // Error handling
+        while(1) {
+        }
+    }
+    // start app 
+    g_gpio_toggle_app->Start();
     // Main application loop
     while (1) {
+
+        g_gpio_toggle_app->Process(nullptr);
         // Run application tasks
         // This could call g_gpio_toggle_app->Process() or similar
     }

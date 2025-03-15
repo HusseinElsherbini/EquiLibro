@@ -269,20 +269,28 @@ bool SysTickInterface::HasTimeoutOccurred(uint64_t timeout) const {
 
 // SysTick interrupt handler
 // This should be called from the SysTick_Handler() in startup code
-void SysTick_Handler(void) {
+
+    // If instance doesn't exist, we simply return without doing anything
+    // This prevents issues during system initialization when the SysTick
+    // interrupt might trigger before the instance is fully set up
+
+}
+} // namespace SysTick
+} // namespace CMSIS
+extern "C" void SysTick_Handler(void) {
     // Get the singleton instance safely
-    auto systick_instance = &SysTickInterface::GetInstance();    
+    auto systick_instance = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();    
     // Check if the instance exists and is valid before using it
     if (systick_instance) {
         // Increment tick count 
         systick_instance->tick_count.fetch_add(1, std::memory_order_relaxed); // atomic increment
         
         // Check if callbacks array is initialized and the specific callback exists
-        if (static_cast<uint32_t>(SysTickCallbackType::Tick) < 
-            static_cast<uint32_t>(SysTickCallbackType::Max)) {
+        if (static_cast<uint32_t>(Platform::CMSIS::SysTick::SysTickCallbackType::Tick) < 
+            static_cast<uint32_t>(Platform::CMSIS::SysTick::SysTickCallbackType::Max)) {
             
             // Get the callback entry safely
-            auto& callback = systick_instance->callbacks[static_cast<uint32_t>(SysTickCallbackType::Tick)];
+            auto& callback = systick_instance->callbacks[static_cast<uint32_t>(Platform::CMSIS::SysTick::SysTickCallbackType::Tick)];
             
             // Call the callback if it's registered
             if (callback.callback != nullptr) {
@@ -290,11 +298,4 @@ void SysTick_Handler(void) {
             }
         }
     }
-    // If instance doesn't exist, we simply return without doing anything
-    // This prevents issues during system initialization when the SysTick
-    // interrupt might trigger before the instance is fully set up
 }
-}
-} // namespace SysTick
-} // namespace CMSIS
-
