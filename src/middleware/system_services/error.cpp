@@ -7,7 +7,7 @@ namespace SystemServices {
     namespace ERROR {
 
 // Static member initialization
-std::array<ErrorInfo, ErrorManager::ERROR_HISTORY_SIZE> ErrorManager::error_history;
+std::array<ErrorInfo, ERROR_HISTORY_SIZE> ErrorManager::error_history;
 std::atomic<size_t> ErrorManager::error_index(0);
 std::array<IErrorHandler*, MAX_ERROR_HANDLERS> ErrorManager::error_handlers;
 std::atomic<size_t> ErrorManager::handler_count(0);

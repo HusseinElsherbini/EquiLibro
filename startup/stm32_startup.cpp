@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <cstddef>
+
 extern "C" {
 
 	
@@ -200,28 +202,49 @@ extern "C" {
 		while(1);
 	}
 	
-	void Reset_Handler(void)
-	{
-		//copy .data section to SRAM
+	void Reset_Handler(void) {
+		// Copy .data section to SRAM
 		uint32_t size = (uint32_t)&_edata - (uint32_t)&_sdata;
+		uint8_t *pDst = (uint8_t*)&_sdata; // SRAM
+		uint8_t *pSrc = (uint8_t*)&_la_data; // Flash
 		
-		uint8_t *pDst = (uint8_t*)&_sdata; //sram
-		uint8_t *pSrc = (uint8_t*)&_la_data; //flash
-		
-		for(uint32_t i =0 ; i < size ; i++)
-		{
+		for(uint32_t i = 0; i < size; i++) {
 			*pDst++ = *pSrc++;
 		}
 		
-		//Init. the .bss section to zero in SRAM
+		// Init the .bss section to zero in SRAM
 		size = (uint32_t)&_ebss - (uint32_t)&_sbss;
 		pDst = (uint8_t*)&_sbss;
-		for(uint32_t i =0 ; i < size ; i++)
-		{
+		for(uint32_t i = 0; i < size; i++) {
 			*pDst++ = 0;
 		}
-		main();
+		// Initialize your heap management here if needed
+		// Set up the heap (if using dynamic memory)
+		// This might be important if your constructors use "new"
+		extern unsigned int __HeapBase;
+		extern unsigned int __HeapLimit;
+
+	    // Call static constructors
+		extern uint32_t __init_array_start;
+		extern uint32_t __init_array_end;
 		
+		// Debug info
+		volatile uint32_t constructor_count = (&__init_array_end - &__init_array_start);
+		volatile uint32_t constructor_index = 0;
+		
+		// Call static constructors one by one
+		uint32_t *p = &__init_array_start;
+		while (p < &__init_array_end) {
+			// This will let you see which constructor causes the fault
+			constructor_index++;
+			
+			void (*constructor_func)(void) = (void (*)(void))*p;
+			constructor_func(); // If a HardFault happens, check the value of constructor_index
+			p++;
+		}
+		
+		// Now call main
+		main();
 	}
 	
 }

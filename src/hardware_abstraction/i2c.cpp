@@ -11,7 +11,6 @@
 namespace Platform {
 namespace I2C {
 
-Middleware::SystemServices::SystemTiming *timing_service = nullptr;
 OS::mutex transfer_mutex;
 static OS::mutex instances_mutex;
 
@@ -27,7 +26,6 @@ I2CInterface::I2CInterface(I2CInstance instance)
     transfer_state.last_error = I2CError::None;
     transfer_state.repeated_start = false;
     transfer_state.notify_task = nullptr;
-    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
     
     // Initialize callbacks
     for (auto& callback : callbacks) {
@@ -77,8 +75,6 @@ I2CInterface::I2CInterface(const I2CInterface& other)
     transfer_state.last_error = I2CError::None;
     transfer_state.repeated_start = false;
     transfer_state.notify_task = nullptr;
-    
-    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
     
     // Initialize callbacks to empty instead of copying
     for (auto& callback : callbacks) {
@@ -176,7 +172,7 @@ Platform::Status I2CInterface::CalculateTimingParameters() {
     
     // Get RCC interface to determine peripheral clock frequency
     Platform::RCC::RccInterface* rcc = &Platform::RCC::RccInterface::GetInstance();
-    
+
     // Determine peripheral clock frequency
     uint32_t pclk1_freq = rcc->GetApb1ClockFrequency();
     
@@ -234,6 +230,8 @@ Platform::Status I2CInterface::CalculateTimingParameters() {
 
 // Initialize I2C interface
 Platform::Status I2CInterface::Init(void* config) {
+
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
 
     if (!timing_service->IsInitialized()) {
         return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
@@ -595,6 +593,13 @@ Platform::Status I2CInterface::RegisterCallback(uint32_t eventId, void (*callbac
 
 // Transmit data to I2C device
 Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* data, uint16_t size, uint32_t timeout) {
+
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    if (!timing_service->IsInitialized()) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
+
     // Check if initialized
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
@@ -777,6 +782,12 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
 
 // Receive data from I2C device
 Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, uint16_t size, uint32_t timeout) {
+
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    if (!timing_service->IsInitialized()) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
     // Check if initialized
     if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
@@ -1028,6 +1039,13 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
 Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr, uint8_t mem_addr_size, 
                                          const uint8_t* data, uint16_t size, uint32_t timeout) {
     // Check if initialized
+
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    if (!timing_service->IsInitialized()) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
+    
     if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -1234,6 +1252,11 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
 Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, uint8_t mem_addr_size, 
                                         uint8_t* data, uint16_t size, uint32_t timeout) {
     // Check if initialized
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    if (!timing_service->IsInitialized()) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
     if (!this->initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -1564,6 +1587,11 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
 // Check if a device is ready by sending its address and checking for ACK
 Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials, uint32_t timeout) {
     // Check if initialized
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    if (!timing_service->IsInitialized()) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
     }
@@ -1678,6 +1706,12 @@ Platform::Status I2CInterface::IsDeviceReady(uint16_t dev_addr, uint32_t trials,
 
 // Recover the I2C bus from errors
 Platform::Status I2CInterface::RecoverBus() {
+
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    if (!timing_service->IsInitialized()) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
     // Check if initialized
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
@@ -1806,7 +1840,11 @@ Platform::Status I2CInterface::PollForStatus(uint32_t status_bit, bool set_state
     if (i2c == nullptr) {
         return Platform::Status::ERROR;
     }
-    
+    Middleware::SystemServices::SystemTiming* timing_service =  &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    if (!timing_service->IsInitialized()) {
+        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+    }
     uint64_t start_time = timing_service->GetMilliseconds(); // Convert to ms
     
     while (true) {

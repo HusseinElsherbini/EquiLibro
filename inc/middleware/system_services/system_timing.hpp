@@ -47,7 +47,6 @@ enum class TimeUnit {
  */
 struct SystemTimingConfig {
     Platform::TIM::TimerInstance instance;
-    uint32_t timer_input_clk_freq;         // Timer clock frequency in Hz
     bool use_rtos_timing;             // Whether to use RTOS timing when available
     bool enable_power_saving;         // Enable power saving features
 };

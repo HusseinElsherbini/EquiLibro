@@ -28,7 +28,17 @@ SECTIONS
 	. = ALIGN(4);
 	_etext = .;
   }> FLASH
-	
+
+    .init_array :
+  {
+      . = ALIGN(4);
+      PROVIDE_HIDDEN (__init_array_start = .);
+      KEEP (*(SORT(.init_array.*)))
+      KEEP (*(.init_array*))
+      PROVIDE_HIDDEN (__init_array_end = .);
+      . = ALIGN(4);
+  } >FLASH
+
   _la_data = LOADADDR(.data); /* returns the absolute load address of given section */
   .data :
   {

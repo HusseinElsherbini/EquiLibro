@@ -18,24 +18,8 @@ namespace SystemServices {
 /**
  * @brief System initialization configuration
  */
-struct SystemInitConfig {
 
-    Platform::RCC::RccConfig SysClockConfig;    // System clock configuration
-    Platform::FLASH::FlashConfig FlashConfig;   // Flash configuration
-    Platform::PWR::PowerConfig PowerConfig;     // Power management configuration
-
-    // Core peripheral configuration
-    bool enableSysTick;             // Enable SysTick timer
-    uint32_t sysTickInterval;       // SysTick interval in microseconds
-    bool enableMPU;                 // Enable Memory Protection Unit
-    bool enableFPU;                 // Enable Floating Point Unit
-    
-};
-
-/**
- * @brief System information structure
- */
-struct SystemInfo {
+ struct SystemInfo {
     uint32_t systemClock;           // Current system clock frequency in Hz
     uint32_t ahbClock;              // AHB bus clock frequency in Hz
     uint32_t apb1Clock;             // APB1 bus clock frequency in Hz
@@ -48,9 +32,23 @@ struct SystemInfo {
     bool dcacheEnabled;             // Whether data cache is enabled
     bool prefetchEnabled;           // Whether flash prefetch is enabled
     Platform::PWR::PowerMode currentPowerMode;     // Current power mode
-    uint8_t flashLatency;           // Current flash latency (wait states)
+    Platform::FLASH::FlashLatency flashLatency;           // Current flash latency (wait states)
     uint64_t uptimeMs;              // System uptime in milliseconds
     uint32_t resetCause;            // Cause of the last reset
+};
+
+struct SystemInitConfig {
+
+    Platform::RCC::RccConfig SysClockConfig;    // System clock configuration
+    Platform::FLASH::FlashConfig FlashConfig;   // Flash configuration
+    Platform::PWR::PowerConfig PowerConfig;     // Power management configuration
+
+    // Core peripheral configuration
+    bool enableSysTick;             // Enable SysTick timer
+    uint32_t sysTickInterval;       // SysTick interval in microseconds
+    bool enableMPU;                 // Enable Memory Protection Unit
+    bool enableFPU;                 // Enable Floating Point Unit
+    
 };
 
 /**
@@ -172,23 +170,8 @@ class SystemManagerImpl : public SystemManager {
         SystemInitConfig config;
         
         // System state information
-        struct {
-            uint32_t system_clock_freq;
-            uint32_t ahb_clock_freq;
-            uint32_t apb1_clock_freq;
-            uint32_t apb2_clock_freq;
-            Platform::RCC::RccClockSource clock_source;
-            bool pll_enabled;
-            Platform::PWR::PowerMode current_power_mode;
-            uint8_t flash_latency;
-            uint32_t reset_cause;
-            bool mpu_enabled;
-            bool fpu_enabled;
-            bool icache_enabled;
-            bool dcache_enabled;
-            bool prefetch_enabled;
-        } system_state;
-        
+        SystemInfo system_state;
+
         // Hardware interface references
         Platform::FLASH::FlashInterface* flash_interface;
         Platform::PWR::PowerInterface* power_interface;

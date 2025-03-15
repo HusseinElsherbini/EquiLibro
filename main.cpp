@@ -7,11 +7,12 @@
 #include "hardware_abstraction/gpio.hpp"
 
 
-// Global instances
-static APP::GpioToggleApp gpio_toggle_app;
+// Global instance, but not initialized yet
+APP::GpioToggleApp *g_gpio_toggle_app = nullptr;  // Default constructor should be "hardware-safe"
 
-int main() {
-    // Configure the system using SystemConfigurator
+// System initialization function
+Platform::Status SystemInit() {
+    // System configuration and initialization
     auto system_config = Middleware::SystemServices::SystemConfigurator()
         .withSystemClock(84000000)       // 84 MHz
         .enablePrefetch()                // Enable flash prefetch
@@ -21,52 +22,56 @@ int main() {
         .enableSysTick(true)
         .withSysTickInterval(1000)       // 1ms interval
         .build();
-    
-    // Initialize system with the configuration
+
+    // Initialize system services
     auto& system_manager = Middleware::SystemServices::SystemManager::GetInstance();
-    
     Platform::Status status = system_manager.Init(&system_config);
-    
     if(status != Platform::Status::OK) {
-
-        // failed intializing system manager
-        while(1);
+        return status;
     }
-
-    // Configure PB13 as toggle led
+    
+    // Initialize timing service
+    auto& timing_service = Middleware::SystemServices::SystemTiming::GetInstance();
+    Middleware::SystemServices::SystemTimingConfig time_service_config = {
+        .instance = Platform::TIM::TimerInstance::TIM5,
+    };
+    status = timing_service.Init(&time_service_config);
+    if(status != Platform::Status::OK) {
+        return status;
+    }
+    
+    // Now that hardware is initialized, configure the application
     APP::GpioToggleConfig gpio_toggle_config = {
-
         .gpio_port = Platform::GPIO::Port::PORTB,
         .gpio_pin = 13,
         .toggle_interval_ms = 1000,
         .start_state = true,
     };
-    // Get system services
-    auto& timing_service = Middleware::SystemServices::SystemTiming::GetInstance();
+    // get app instance
+    g_gpio_toggle_app = &APP::GpioToggleApp::GetGpioToggleApp();
+    
+    // Initialize the application with hardware-dependent operations
+    return g_gpio_toggle_app->Init(&gpio_toggle_config);
+}
 
-    Middleware::SystemServices::SystemTimingConfig time_service_config = {
-
-        .instance = Platform::TIM::TimerInstance::TIM5,
-        .timer_input_clk_freq = 84000000,
-    };
-
-    status = timing_service.Init(&time_service_config); 
+int main() {
+    // Initialize system and application
+    Platform::Status status = SystemInit();
+    
     if(status != Platform::Status::OK) {
-
-        // failed intializing system manager
-        while(1);
+        // Error handling
+        while(1) {
+            // Perhaps blink an error code on an LED
+        }
     }
-
-    // initialize application 
-    gpio_toggle_app.Init(&gpio_toggle_config);
-
-    // Should never reach here
+    
+    // Main application loop
     while (1) {
-        // Infinite loop
+        // Run application tasks
+        // This could call g_gpio_toggle_app->Process() or similar
     }
     
     return 0;
 }
-
 
 

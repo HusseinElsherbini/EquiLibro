@@ -5,9 +5,10 @@
 #include "common/platform_flash.hpp"
 #include <memory>
 #include "os/mutex.hpp"
+#include "flash.hpp"
+
 namespace Platform {
 namespace RCC {
-
 
 static OS::mutex instance_mutex;
 // Constructor
@@ -69,7 +70,7 @@ Platform::Status RccInterface::Init(void* config) {
     }
     
     RccConfig* rccConfig = static_cast<RccConfig*>(config);
-    
+
     // If no config provided, use default
     if (rccConfig == nullptr) {
         activeConfig = CreateDefaultConfig();
@@ -141,6 +142,10 @@ Platform::Status RccInterface::ConfigureSystemClock(const RccConfig& config) {
     if (localConfig.clockSource == RccClockSource::HSE || 
         (localConfig.clockSource == RccClockSource::PLL && 
          localConfig.pllConfig.source == RccClockSource::HSE)) {
+
+        // First, clear bypass mode to use crystal oscillator
+        Platform::clearBit(rcc->CR, Platform::RCC::getBitValue(Platform::RCC::CR::HSEBYP));
+
         // Enable HSE
         Platform::setBit(rcc->CR, Platform::RCC::getBitValue(Platform::RCC::CR::HSEON));
         
@@ -166,6 +171,26 @@ Platform::Status RccInterface::ConfigureSystemClock(const RccConfig& config) {
     
     // Step 2: Configure PLL if needed
     if (localConfig.clockSource == RccClockSource::PLL) {
+
+        bool pllIsSystemClock = ((rcc->CFGR & Platform::RCC::getBitValue(Platform::RCC::CFGR::SWS_MSK)) == 
+                         Platform::RCC::getBitValue(Platform::RCC::CFGR::SWS_PLL));
+
+        // If PLL is the system clock, we need to switch to HSI first
+        if (pllIsSystemClock) {
+            // Switch system clock to HSI
+            Platform::modifyReg(rcc->CFGR, 
+                            Platform::RCC::getBitValue(Platform::RCC::CFGR::SW_MSK),
+                            Platform::RCC::getBitValue(Platform::RCC::CFGR::SW_HSI));
+                            
+            // Wait for clock switch to complete
+            uint32_t timeout = 50000;
+            while (((rcc->CFGR & Platform::RCC::getBitValue(Platform::RCC::CFGR::SWS_MSK)) != 
+                    Platform::RCC::getBitValue(Platform::RCC::CFGR::SWS_HSI))) {
+                if (--timeout == 0) {
+                    return Platform::Status::TIMEOUT;
+                }
+            }
+        }
         // Disable PLL before configuring
         Platform::clearBit(rcc->CR, Platform::RCC::getBitValue(Platform::RCC::CR::PLLON));
         
@@ -339,6 +364,17 @@ Platform::Status RccInterface::CalculatePllSettings(RccConfig& config) {
         return Platform::Status::INVALID_PARAM;
     }
     
+    // For 25MHz HSE and 84MHz target, use proven values
+    if (config.hseFrequencyHz == 25000000 && config.systemClockHz == 84000000) {
+        // Use the known working values
+        config.pllConfig.m = 25;    // 25MHz / 25 = 1MHz PLL input
+        config.pllConfig.n = 336;   // 1MHz * 336 = 336MHz VCO
+        config.pllConfig.p = 4;     // 336MHz / 4 = 84MHz system clock
+        config.pllConfig.q = 7;     // 336MHz / 7 = 48MHz (for USB)
+        return Platform::Status::OK;
+    }
+    
+    // For other configurations, we can still use auto-calculation
     // Determine PLL input clock source and frequency
     uint32_t inputFreq;
     if (config.pllConfig.source == RccClockSource::HSE) {
@@ -362,69 +398,53 @@ Platform::Status RccInterface::CalculatePllSettings(RccConfig& config) {
         return Platform::Status::INVALID_PARAM;
     }
     
-    // Find a suitable P value (must be 2, 4, 6, or 8)
-    // Try with smallest first for best performance
-    config.pllConfig.p = 2;
+    // Start with PLLP = 4 for most reliable operation
+    config.pllConfig.p = 4;
     
-    // Calculate required VCO output to achieve target system clock
-    uint32_t vcoOutput = config.systemClockHz * config.pllConfig.p;
+    // Calculate PLLN to achieve the desired system clock
+    // config.systemClockHz = (vcoInput * PLLN) / PLLP
+    config.pllConfig.n = (config.systemClockHz * config.pllConfig.p) / vcoInput;
     
-    // Check if VCO output is within valid range (100-432 MHz)
-    if (vcoOutput > 432000000) {
-        // Try higher P values
-        config.pllConfig.p = 4;
-        vcoOutput = config.systemClockHz * config.pllConfig.p;
+    // Check if PLLN is within valid range (50-432)
+    if (config.pllConfig.n < 50 || config.pllConfig.n > 432) {
+        // Try with PLLP = 2
+        config.pllConfig.p = 2;
+        config.pllConfig.n = (config.systemClockHz * config.pllConfig.p) / vcoInput;
         
-        if (vcoOutput > 432000000) {
+        if (config.pllConfig.n < 50 || config.pllConfig.n > 432) {
+            // Try with PLLP = 6
             config.pllConfig.p = 6;
-            vcoOutput = config.systemClockHz * config.pllConfig.p;
+            config.pllConfig.n = (config.systemClockHz * config.pllConfig.p) / vcoInput;
             
-            if (vcoOutput > 432000000) {
+            if (config.pllConfig.n < 50 || config.pllConfig.n > 432) {
+                // Try with PLLP = 8
                 config.pllConfig.p = 8;
-                vcoOutput = config.systemClockHz * config.pllConfig.p;
+                config.pllConfig.n = (config.systemClockHz * config.pllConfig.p) / vcoInput;
                 
-                if (vcoOutput > 432000000) {
+                if (config.pllConfig.n < 50 || config.pllConfig.n > 432) {
                     return Platform::Status::INVALID_PARAM; // Cannot achieve target frequency
                 }
             }
         }
-    } else if (vcoOutput < 100000000) {
-        return Platform::Status::INVALID_PARAM; // VCO output too low
     }
     
-    // Calculate PLLN to achieve the desired VCO output
-    config.pllConfig.n = vcoOutput / vcoInput;
-    
-    // Check if PLLN is within valid range (50-432)
-    if (config.pllConfig.n < 50 || config.pllConfig.n > 432) {
+    // Verify VCO output is within valid range (100-432 MHz)
+    uint32_t vcoOutput = vcoInput * config.pllConfig.n;
+    if (vcoOutput < 100000000 || vcoOutput > 432000000) {
         return Platform::Status::INVALID_PARAM;
     }
     
     // Calculate USB frequency Q divider (48MHz output for USB)
-    if (vcoOutput % 48000000 == 0) {
-        config.pllConfig.q = vcoOutput / 48000000;
-        if (config.pllConfig.q < 2 || config.pllConfig.q > 15) {
-            // If can't get exact 48MHz, approximate
-            config.pllConfig.q = vcoOutput / 48000000;
-            if (config.pllConfig.q < 2) config.pllConfig.q = 2;
-            if (config.pllConfig.q > 15) config.pllConfig.q = 15;
-        }
-    } else {
-        // Approximate division for USB
-        config.pllConfig.q = vcoOutput / 48000000;
-        if (config.pllConfig.q < 2) config.pllConfig.q = 2;
-        if (config.pllConfig.q > 15) config.pllConfig.q = 15;
-    }
+    config.pllConfig.q = vcoOutput / 48000000;
+    if (config.pllConfig.q < 2) config.pllConfig.q = 2;
+    if (config.pllConfig.q > 15) config.pllConfig.q = 15;
     
     return Platform::Status::OK;
 }
 // Implement the ConfigureFlashLatency method
 Platform::Status RccInterface::ConfigureFlashLatency(uint32_t systemClockHz) {
-
-    using namespace Platform:: FLASH;
-
     // Determine proper flash latency based on system clock frequency
-    uint8_t flashLatency;
+    Platform::FLASH::FlashLatency flashLatency;
     
     // For STM32F401 (3.3V operation):
     // 0 WS: 0 < HCLK ≤ 24 MHz
@@ -432,37 +452,35 @@ Platform::Status RccInterface::ConfigureFlashLatency(uint32_t systemClockHz) {
     // 2 WS: 48 MHz < HCLK ≤ 72 MHz
     // 3 WS: 72 MHz < HCLK ≤ 84 MHz
     if (systemClockHz <= 24000000) {
-        flashLatency = 0;
+        flashLatency = Platform::FLASH::FlashLatency::WS0;
     } else if (systemClockHz <= 48000000) {
-        flashLatency = 1;
+        flashLatency = Platform::FLASH::FlashLatency::WS1;
     } else if (systemClockHz <= 72000000) {
-        flashLatency = 2;
+        flashLatency = Platform::FLASH::FlashLatency::WS2;
     } else if (systemClockHz <= 84000000) {
-        flashLatency = 3;
+        flashLatency = Platform::FLASH::FlashLatency::WS3;
     } else {
         return Platform::Status::INVALID_PARAM; // Clock frequency too high
     }
     
-    // Get a pointer to the Flash Access Control Register
-    volatile uint32_t* flashAcr = reinterpret_cast<volatile uint32_t*>(Platform::FLASH::FLASH_ACR);
-    
-    // Apply new flash latency value while preserving other bits
-    uint32_t regValue = *flashAcr;
-    regValue &= ~0xF; // Clear latency bits (first 4 bits)
-    regValue |= flashLatency; // Set new latency
-    
-    // Enable prefetch, instruction cache, and data cache for better performance
-    regValue |= static_cast<uint32_t>(ACR::PRFTEN | ACR::DCEN | ACR::DCEN); // PRFTEN, ICEN, DCEN
-    
-    // Write new configuration
-    *flashAcr = regValue;
-
-    // Verify that the new latency setting was applied
-    if ((*flashAcr & 0xF) != flashLatency) {
+    // Get Flash interface
+    Platform::FLASH::FlashInterface* flash = &Platform::FLASH::FlashInterface::GetInstance();
+    if (!flash) {
         return Platform::Status::ERROR;
     }
     
-    return Platform::Status::OK;
+    // Enable RCC clock for Flash interface if needed
+    // (This might already be enabled by default on some STM32 devices)
+    
+    // Configure flash with appropriate latency
+    Platform::FLASH::FlashConfig flash_config = {
+        .latency = flashLatency,
+        .prefetch_enable = true,  // Enable prefetch for better performance
+        .icache_enable = true,    // Enable instruction cache
+        .dcache_enable = true     // Enable data cache
+    };
+    
+    return flash->Configure(flash_config);
 }
 
 Platform::Status RccInterface::ClearResetFlags(void) {
@@ -563,21 +581,24 @@ Platform::Status RccInterface::Control(uint32_t command, void* param) {
             return DisablePeripheralClock(peripheral);
         }
         
-        case RCC_CTRL_GET_CLOCK_FREQUENCY: {
+        case RCC_CTRL_GET_SYS_CLOCK_FREQUENCY: {
+
+            uint32_t freq = GetSystemClockFrequency();
+
+            *static_cast<uint32_t *>(param) = freq;
+
+            return Platform::Status::OK;
+
+        }
+        case RCC_CTRL_GET_PERIPHERAL_CLOCK_FREQUENCY: {
             struct {
                 RccPeripheral peripheral;
                 uint32_t frequency;
             }* freq_info = static_cast<decltype(freq_info)>(param);
             
             // Determine which bus the peripheral is on and return appropriate frequency
+            RccBusType bus = GetBusType(freq_info->peripheral);
 
-            auto it = peripheralMap.find(freq_info->peripheral);
-            if (it == peripheralMap.end()) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            RccBusType bus = it->second.bus;
-            uint8_t bitPos = it->second.bitPosition;
-            
             switch (bus) {
                 case RccBusType::AHB1 :  // AHB1
                     freq_info->frequency = clockFreqs.ahbClock;
@@ -661,12 +682,8 @@ Platform::Status RccInterface::EnablePeripheralClock(Platform::RCC::RccPeriphera
 
     // get bus and bit position from map 
 
-    auto it = peripheralMap.find(peripheral);
-    if (it == peripheralMap.end()) {
-        return Platform::Status::INVALID_PARAM;
-    }
-    RccBusType bus = it->second.bus;
-    uint8_t bitPos = it->second.bitPosition;
+    RccBusType bus = GetBusType(peripheral);
+    uint8_t bitPos = GetBitPosition(peripheral);
     
     // Enable the peripheral clock and update the enabled peripherals bitmask
     switch (bus) {
@@ -710,15 +727,8 @@ Platform::Status RccInterface::IsPeripheralClockEnabled(
     // Initialize output parameter to a safe value
     enabled = false;
     
-    // Find the peripheral in the map
-    auto it = peripheralMap.find(peripheral);
-    if (it == peripheralMap.end()) {
-        return Platform::Status::INVALID_PARAM;
-    }
-    
-    // Extract bus type and bit position
-    RccBusType bus = it->second.bus;
-    uint8_t bitPos = it->second.bitPosition;
+    RccBusType bus = GetBusType(peripheral);
+    uint8_t bitPos = GetBitPosition(peripheral);
     
     // Create bit mask for this peripheral
     uint32_t bitMask = (1UL << bitPos);
@@ -743,7 +753,13 @@ Platform::Status RccInterface::IsPeripheralClockEnabled(
     
     return Platform::Status::OK;
 }
+RccBusType RccInterface::GetBusType(RccPeripheral peripheral) const {
+    return static_cast<RccBusType>((static_cast<uint32_t>(peripheral) >> 8) & 0xFF);
+}
 
+uint8_t RccInterface::GetBitPosition(RccPeripheral peripheral) const {
+    return static_cast<uint8_t>(static_cast<uint32_t>(peripheral) & 0xFF);
+}
 Platform::Status RccInterface::DisablePeripheralClock(Platform::RCC::RccPeripheral peripheral) {
 
     using namespace Platform::RCC;
@@ -752,12 +768,8 @@ Platform::Status RccInterface::DisablePeripheralClock(Platform::RCC::RccPeripher
     
     // Determine which bus this peripheral is on
     // get bus and bit position from map 
-    auto it = peripheralMap.find(peripheral);
-    if (it == peripheralMap.end()) {
-        return Platform::Status::INVALID_PARAM;
-    }
-    RccBusType bus = it->second.bus;
-    uint8_t bitPos = it->second.bitPosition;
+    RccBusType bus = GetBusType(peripheral);
+    uint8_t bitPos = GetBitPosition(peripheral);
     
     // Disable the appropriate clock
     switch (bus) {

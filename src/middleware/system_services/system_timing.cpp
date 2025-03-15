@@ -81,11 +81,10 @@ Platform::Status SystemTiming::Init(void* config) {
     timer_config.direction = Platform::TIM::Direction::Up;
     timer_config.alignment = Platform::TIM::Alignment::Edge;
     
-    // Calculate the prescaler to get microsecond resolution
-    // For example, if the timer clock is 84MHz, we need a prescaler of 84 to get 1MHz timer frequency
-    uint32_t timer_clock = this->config.timer_input_clk_freq;
-    timer_config.prescaler = timer_clock / 1000000UL - 1; // Prescaler for 1MHz (1us resolution)
-    timer_config.period = 0xFFFFFFFF; // Maximum period for a 32-bit timer
+    // Let the TimerInterface determine the appropriate prescaler for 1MHz timing
+    // This is where we delegate the clock frequency determination to the timer interface
+    timer_config.desiredFrequency = 1000000UL;  // 1MHz (1μs resolution)
+    timer_config.period = 0xFFFFFFFF;  // Maximum period for a 32-bit timer
     timer_config.autoReloadPreload = true;
     
     // Initialize the timer

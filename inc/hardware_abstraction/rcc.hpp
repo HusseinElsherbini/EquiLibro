@@ -116,19 +116,19 @@ public:
     uint32_t GetAhbClockFrequency() const;
     uint32_t GetApb1ClockFrequency() const;
     uint32_t GetApb2ClockFrequency() const;
-    
+    void InitializePeripheralMap() const;
     uint32_t GetResetFlags() const;
 
     // Default configuration creator
     static RccConfig CreateDefaultConfig();
-    
-
+    RccBusType GetBusType(RccPeripheral peripheral) const;
+    uint8_t GetBitPosition(RccPeripheral peripheral) const;
 };
 
 // RCC control command identifiers
 constexpr uint32_t RCC_CTRL_ENABLE_PERIPHERAL = 0x0401;
 constexpr uint32_t RCC_CTRL_DISABLE_PERIPHERAL = 0x0402;
-constexpr uint32_t RCC_CTRL_GET_CLOCK_FREQUENCY = 0x0403;
+constexpr uint32_t RCC_CTRL_GET_SYS_CLOCK_FREQUENCY = 0x0403;
 constexpr uint32_t RCC_CTRL_SET_CLOCK_FREQUENCY = 0x0404;
 constexpr uint32_t RCC_CTRL_ENTER_LOW_POWER = 0x0405;
 constexpr uint32_t RCC_CTRL_EXIT_LOW_POWER = 0x0406;
@@ -137,6 +137,6 @@ constexpr uint32_t RCC_CTRL_CONFIGURE_SYSTEM_CLOCK = 0x0408;
 constexpr uint32_t RCC_CTRL_GET_ALL_CLOCK_FREQUENCIES = 0x0409;
 constexpr uint32_t RCC_CTRL_GET_CLOCK_SOURCE = 0x040A;
 constexpr uint32_t RCC_CTRL_CLEAR_RESET_FLAGS = 0x040B;
-
+constexpr uint32_t RCC_CTRL_GET_PERIPHERAL_CLOCK_FREQUENCY = 0x040C;
 }// namespace RCC       
 }// namespace Platform

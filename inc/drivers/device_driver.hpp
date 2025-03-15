@@ -409,8 +409,7 @@ public:
         // Initialize timing service if not already initialized
         if (!timing_service->IsInitialized()) {
             Middleware::SystemServices::SystemTimingConfig timing_config = {};
-            timing_config.high_precision_timer = 2;  // TIM2
-            timing_config.timer_frequency = Platform::MCU_CLK;
+            timing_config.instance = Platform::TIM::TimerInstance::TIM5;  // TIM5
             timing_config.use_rtos_timing = false;
             timing_config.enable_power_saving = false;
             

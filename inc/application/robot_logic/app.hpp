@@ -80,6 +80,7 @@ public:
     
     // ApplicationModule interface implementation
     
+    static GpioToggleApp& GetGpioToggleApp();
     /**
      * Get current application state
      */

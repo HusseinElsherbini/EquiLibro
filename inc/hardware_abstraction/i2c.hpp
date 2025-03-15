@@ -97,8 +97,6 @@ private:
     I2CInstance instance;
     I2CConfig config;
     
-    static Middleware::SystemServices::SystemTiming* timing_service;
-
     struct TransferState {
         bool in_progress;
         CurrentTransferState state;

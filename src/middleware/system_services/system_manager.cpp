@@ -85,23 +85,29 @@ SystemInitConfig SystemManager::GetLowPowerConfig() {
 }
 
 // Maximum performance configuration preset
+// Maximum performance configuration preset
 SystemInitConfig SystemManager::GetMaxPerformanceConfig() {
-
     SystemInitConfig config = GetDefaultConfig();
     
     // Maximum clock for STM32F401
     config.SysClockConfig.systemClockHz = 84000000;  // 84 MHz
     config.SysClockConfig.clockSource = Platform::RCC::RccClockSource::PLL;
     config.SysClockConfig.hseFrequencyHz = 25000000;  // 25 MHz external crystal
-    config.SysClockConfig.pllConfig.autoCalculate = true;
+    
+    // Use known working values instead of auto-calculate
+    config.SysClockConfig.pllConfig.autoCalculate = false;
     config.SysClockConfig.pllConfig.source = Platform::RCC::RccClockSource::HSE;
-
+    config.SysClockConfig.pllConfig.m = 25;    // 25MHz / 25 = 1MHz PLL input
+    config.SysClockConfig.pllConfig.n = 336;   // 1MHz * 336 = 336MHz VCO
+    config.SysClockConfig.pllConfig.p = 4;     // 336MHz / 4 = 84MHz system clock
+    config.SysClockConfig.pllConfig.q = 7;     // 336MHz / 7 = 48MHz (for USB)
     
     // Enable all performance enhancing features
     config.FlashConfig.prefetch_enable = true;
     config.FlashConfig.icache_enable = true;
     config.FlashConfig.dcache_enable = true;
-
+    config.FlashConfig.latency = Platform::FLASH::FlashLatency::WS3; // Appropriate for 84MHz
+    
     config.enableFPU = true;
     
     return config;
@@ -112,20 +118,21 @@ SystemManagerImpl::SystemManagerImpl()
     : initialized(false) {
     
     // Initialize state tracking
-    system_state.system_clock_freq = 16000000; // Default to HSI
-    system_state.ahb_clock_freq = 16000000;
-    system_state.apb1_clock_freq = 16000000;
-    system_state.apb2_clock_freq = 16000000;
-    system_state.clock_source = Platform::RCC::RccClockSource::HSI;
-    system_state.pll_enabled = false;
-    system_state.current_power_mode = Platform::PWR::PowerMode::Run;
-    system_state.flash_latency = 0;
-    system_state.reset_cause = static_cast<uint32_t>(ResetCause::PowerOn);
-    system_state.mpu_enabled = false;
-    system_state.fpu_enabled = false;
-    system_state.icache_enabled = false;
-    system_state.dcache_enabled = false;
-    system_state.prefetch_enabled = false;
+    system_state.systemClock = 16000000;  // Default to HSI
+    system_state.ahbClock = 16000000;
+    system_state.apb1Clock = 16000000;
+    system_state.apb2Clock = 16000000;
+    system_state.clockSource = Platform::RCC::RccClockSource::HSI;
+    system_state.pllEnabled = false;
+    system_state.currentPowerMode = Platform::PWR::PowerMode::Run;
+    system_state.flashLatency = Platform::FLASH::FlashLatency::WS0;
+    system_state.resetCause = static_cast<uint32_t>(ResetCause::PowerOn);
+    system_state.mpuEnabled = false;
+    system_state.fpuEnabled = false;
+    system_state.icacheEnabled = false;
+    system_state.dcacheEnabled = false;
+    system_state.prefetchEnabled = false;
+    system_state.uptimeMs = 0;
     
     // Initialize callbacks
     for (auto& callback : callbacks) {
@@ -147,59 +154,86 @@ Platform::Status SystemManagerImpl::Init(void* config) {
     if (initialized) {
         return Platform::Status::OK; // Already initialized
     }
-    
+
     // Validate input configuration
     if (config == nullptr) {
         // Use default configuration if none provided
-        this->config = GetDefaultConfig();
+        this->config = SystemManager::GetDefaultConfig();
     } else {
         this->config = *static_cast<SystemInitConfig*>(config);
     }
-        // Acquire hardware interfaces
+    
+    // Step 1: First, enable RCC as it controls all peripheral clocks
     rcc_interface = &Platform::RCC::RccInterface::GetInstance();
     if (!rcc_interface) {
         return Platform::Status::ERROR;
     }
     
-    power_interface = &Platform::PWR::PowerInterface::GetInstance();
-    if (!power_interface) {
-        return Platform::Status::ERROR;
+    // Initialize RCC first with basic configuration
+    Platform::RCC::RccConfig rcc_config = this->config.SysClockConfig;
+    Platform::Status status = rcc_interface->Init(&rcc_config);
+    if (status != Platform::Status::OK) {
+        return status;
     }
     
+    // Step 2: Initialize Flash with proper latency for the upcoming system clock
     flash_interface = &Platform::FLASH::FlashInterface::GetInstance();
     if (!flash_interface) {
         return Platform::Status::ERROR;
     }
     
-    systick_interface = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
-    if (!systick_interface) {
+    Platform::FLASH::FlashConfig flash_config = this->config.FlashConfig;
+    status = flash_interface->Init(&flash_config);
+    if (status != Platform::Status::OK) {
+        return status;
+    }
+    
+    // Step 3: Now configure system clock (will use Flash and RCC)
+    status = ConfigureSystemClock();
+    if (status != Platform::Status::OK) {
+        return status;
+    }
+    
+    // Step 4: Initialize Power Management subsystem
+    power_interface = &Platform::PWR::PowerInterface::GetInstance();
+    if (!power_interface) {
         return Platform::Status::ERROR;
     }
-    // Determine the cause of the reset
-    system_state.reset_cause = static_cast<uint32_t>(DetermineResetCause());
+    
+    status = power_interface->Init(&this->config.PowerConfig);
+    if (status != Platform::Status::OK) {
+        return status;
+    }
+    
+    // Determine the cause of the reset now that core peripherals are initialized
+    system_state.resetCause = static_cast<uint32_t>(DetermineResetCause());
     ClearResetFlags();
-
-    // Configure the system clock
-    Platform::Status status = ConfigureSystemClock();
-    if (status != Platform::Status::OK) {
-        return status;
-    }
     
-    // Configure flash latency based on system clock
-    status = ConfigureFlashLatency(system_state.system_clock_freq, this->config.FlashConfig.latency);
-    if (status != Platform::Status::OK) {
-        return status;
-    }
-    
-    // Configure SysTick if requested
+    // Step 5: Configure SysTick if requested
     if (this->config.enableSysTick) {
-        status = ConfigureSysTick(this->config.sysTickInterval);
+        systick_interface = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
+        if (!systick_interface) {
+            return Platform::Status::ERROR;
+        }
+        
+        Platform::CMSIS::SysTick::SysTickConfig systick_config = {
+            .reload_value = (system_state.systemClock / 1000000) * this->config.sysTickInterval,
+            .enable_interrupt = true,
+            .use_processor_clock = true
+        };
+        
+        status = systick_interface->Init(&systick_config);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = systick_interface->Control(Platform::CMSIS::SysTick::SYSTICK_CTRL_START, nullptr);
         if (status != Platform::Status::OK) {
             return status;
         }
     }
     
-    // Configure MPU if requested
+    // Step 6: Configure MPU if requested
     if (this->config.enableMPU) {
         status = ConfigureMPU();
         if (status != Platform::Status::OK) {
@@ -207,7 +241,7 @@ Platform::Status SystemManagerImpl::Init(void* config) {
         }
     }
     
-    // Configure FPU if requested
+    // Step 7: Configure FPU if requested
     if (this->config.enableFPU) {
         status = ConfigureFPU();
         if (status != Platform::Status::OK) {
@@ -215,18 +249,31 @@ Platform::Status SystemManagerImpl::Init(void* config) {
         }
     }
     
-    // Configure cache settings
-    status = ConfigureCache();
-    if (status != Platform::Status::OK) {
-        return status;
-    }
-    
-    // Set initial power mode
+    // Step 9: Set initial power mode
     status = SetPowerMode(this->config.PowerConfig.power_mode);
     if (status != Platform::Status::OK) {
         return status;
     }
-    
+
+    Platform::RCC::SysCLockFreqs clock_freqs;
+    status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_ALL_CLOCK_FREQUENCIES, &clock_freqs);
+
+    // Initialize state tracking
+    system_state.systemClock = clock_freqs.systemClock;
+    system_state.ahbClock = clock_freqs.ahbClock;
+    system_state.apb1Clock = clock_freqs.apb1Clock;
+    system_state.apb2Clock = clock_freqs.apb2Clock;
+    system_state.clockSource = this->config.SysClockConfig.clockSource;
+    system_state.pllEnabled = true;
+    system_state.currentPowerMode = this->config.PowerConfig.power_mode;
+    system_state.flashLatency = this->config.FlashConfig.latency;
+    system_state.resetCause = static_cast<uint32_t>(ResetCause::PowerOn);
+    system_state.mpuEnabled = this->config.enableMPU;
+    system_state.fpuEnabled = this->config.enableFPU;
+    system_state.icacheEnabled = this->config.FlashConfig.icache_enable;
+    system_state.dcacheEnabled = this->config.FlashConfig.dcache_enable;
+    system_state.prefetchEnabled = this->config.FlashConfig.prefetch_enable;
+
     // Trigger clock configured callback if registered
     if (callbacks[static_cast<uint32_t>(SystemEvent::ClockConfigured)].active) {
         callbacks[static_cast<uint32_t>(SystemEvent::ClockConfigured)].callback(
@@ -237,7 +284,6 @@ Platform::Status SystemManagerImpl::Init(void* config) {
     initialized = true;
     return Platform::Status::OK;
 }
-
 // Process function - for periodic tasks
 Platform::Status SystemManagerImpl::Process(void* input, void* output) {
     if (!initialized) {
@@ -274,7 +320,7 @@ Platform::Status SystemManagerImpl::Configure(uint32_t param_id, void* value) {
         case SYSTEM_PARAM_FLASH_LATENCY: {
             Platform::FLASH::FlashLatency* new_latency = static_cast<Platform::FLASH::FlashLatency*>(value);
             config.FlashConfig.latency = *new_latency;
-            return ConfigureFlashLatency(system_state.system_clock_freq, *new_latency);
+            return ConfigureFlashLatency(system_state.systemClock, *new_latency);
         }
         
         case SYSTEM_PARAM_POWER_MODE: {
@@ -330,10 +376,10 @@ Platform::Status SystemManagerImpl::GetInfo(uint32_t info_id, void* buffer, uint
             }
             
             ClockFrequencies* freqs = static_cast<ClockFrequencies*>(buffer);
-            freqs->system_clock = system_state.system_clock_freq;
-            freqs->ahb_clock = system_state.ahb_clock_freq;
-            freqs->apb1_clock = system_state.apb1_clock_freq;
-            freqs->apb2_clock = system_state.apb2_clock_freq;
+            freqs->system_clock = system_state.systemClock;
+            freqs->ahb_clock = system_state.ahbClock;
+            freqs->apb1_clock = system_state.apb1Clock;
+            freqs->apb2_clock = system_state.apb2Clock;
             *size = sizeof(ClockFrequencies);
             return Platform::Status::OK;
         }
@@ -343,7 +389,7 @@ Platform::Status SystemManagerImpl::GetInfo(uint32_t info_id, void* buffer, uint
             if (*size < sizeof(uint32_t)) {
                 return Platform::Status::BUFFER_OVERFLOW;
             }
-            *static_cast<uint32_t*>(buffer) = system_state.reset_cause;
+            *static_cast<uint32_t*>(buffer) = system_state.resetCause;
             *size = sizeof(uint32_t);
             return Platform::Status::OK;
             
@@ -354,21 +400,21 @@ Platform::Status SystemManagerImpl::GetInfo(uint32_t info_id, void* buffer, uint
             }
             
             SystemInfo* info = static_cast<SystemInfo*>(buffer);
-            info->systemClock = system_state.system_clock_freq;
-            info->ahbClock = system_state.ahb_clock_freq;
-            info->apb1Clock = system_state.apb1_clock_freq;
-            info->apb2Clock = system_state.apb2_clock_freq;
-            info->clockSource = system_state.clock_source;
-            info->pllEnabled = system_state.pll_enabled;
-            info->mpuEnabled = system_state.mpu_enabled;
-            info->fpuEnabled = system_state.fpu_enabled;
-            info->icacheEnabled = system_state.icache_enabled;
-            info->dcacheEnabled = system_state.dcache_enabled;
-            info->prefetchEnabled = system_state.prefetch_enabled;
-            info->currentPowerMode = system_state.current_power_mode;
-            info->flashLatency = system_state.flash_latency;
+            info->systemClock = system_state.systemClock;
+            info->ahbClock = system_state.ahbClock;
+            info->apb1Clock = system_state.apb1Clock;
+            info->apb2Clock = system_state.apb2Clock;
+            info->clockSource = system_state.clockSource;
+            info->pllEnabled = system_state.pllEnabled;
+            info->mpuEnabled = system_state.mpuEnabled;
+            info->fpuEnabled = system_state.fpuEnabled;
+            info->icacheEnabled = system_state.icacheEnabled;
+            info->dcacheEnabled = system_state.dcacheEnabled;
+            info->prefetchEnabled = system_state.prefetchEnabled;
+            info->currentPowerMode = system_state.currentPowerMode;
+            info->flashLatency = system_state.flashLatency;
             info->uptimeMs = GetUptime();
-            info->resetCause = system_state.reset_cause;
+            info->resetCause = system_state.resetCause;
             
             *size = sizeof(SystemInfo);
             return Platform::Status::OK;
@@ -440,32 +486,32 @@ Platform::Status SystemManagerImpl::RegisterCallback(uint32_t event, void (*call
 
 // Get the current system clock frequency
 uint32_t SystemManagerImpl::GetSystemClock() const {
-    return system_state.system_clock_freq;
+    return system_state.systemClock;
 }
 
 // Get the current AHB clock frequency
 uint32_t SystemManagerImpl::GetAHBClock() const {
-    return system_state.ahb_clock_freq;
+    return system_state.ahbClock;
 }
 
 // Get the current APB1 clock frequency
 uint32_t SystemManagerImpl::GetAPB1Clock() const {
-    return system_state.apb1_clock_freq;
+    return system_state.apb1Clock;
 }
 
 // Get the current APB2 clock frequency
 uint32_t SystemManagerImpl::GetAPB2Clock() const {
-    return system_state.apb2_clock_freq;
+    return system_state.apb2Clock;
 }
 
 // Get the current clock source
 Platform::RCC::RccClockSource SystemManagerImpl::GetClockSource() const {
-    return system_state.clock_source;
+    return system_state.clockSource;
 }
 
 // Check if PLL is enabled
 bool SystemManagerImpl::IsPLLEnabled() const {
-    return system_state.pll_enabled;
+    return system_state.pllEnabled;
 }
 
 // Set the system power mode
@@ -535,7 +581,7 @@ Platform::Status SystemManagerImpl::SetPowerMode(Platform::PWR::PowerMode mode) 
     }
     
     // Update the current power mode state
-    system_state.current_power_mode = mode;
+    system_state.currentPowerMode = mode;
     
     // Trigger power mode change callback if registered
     if (callbacks[static_cast<uint32_t>(SystemEvent::PowerModeChanged)].active) {
@@ -549,7 +595,7 @@ Platform::Status SystemManagerImpl::SetPowerMode(Platform::PWR::PowerMode mode) 
 
 // Get the current power mode
 Platform::PWR::PowerMode SystemManagerImpl::GetPowerMode() const {
-    return system_state.current_power_mode;
+    return system_state.currentPowerMode;
 }
 
 // Perform a software reset
@@ -567,7 +613,7 @@ Platform::Status SystemManagerImpl::SoftwareReset() {
 
 // Get the cause of the last reset
 ResetCause SystemManagerImpl::GetResetCause() const {
-    return static_cast<ResetCause>(system_state.reset_cause);
+    return static_cast<ResetCause>(system_state.resetCause);
 }
 
 // Get system uptime in milliseconds
@@ -589,26 +635,23 @@ uint64_t SystemManagerImpl::GetUptime() const {
 
 // Get comprehensive system information
 Platform::Status SystemManagerImpl::GetSystemInfo(SystemInfo& info) const {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
+
     // Fill in the system information structure
-    info.systemClock = system_state.system_clock_freq;
-    info.ahbClock = system_state.ahb_clock_freq;
-    info.apb1Clock = system_state.apb1_clock_freq;
-    info.apb2Clock = system_state.apb2_clock_freq;
-    info.clockSource = system_state.clock_source;
-    info.pllEnabled = system_state.pll_enabled;
-    info.mpuEnabled = system_state.mpu_enabled;
-    info.fpuEnabled = system_state.fpu_enabled;
-    info.icacheEnabled = system_state.icache_enabled;
-    info.dcacheEnabled = system_state.dcache_enabled;
-    info.prefetchEnabled = system_state.prefetch_enabled;
-    info.currentPowerMode = system_state.current_power_mode;
-    info.flashLatency = system_state.flash_latency;
+    info.systemClock = system_state.systemClock;
+    info.ahbClock = system_state.ahbClock;
+    info.apb1Clock = system_state.apb1Clock;
+    info.apb2Clock = system_state.apb2Clock;
+    info.clockSource = system_state.clockSource;
+    info.pllEnabled = system_state.pllEnabled;
+    info.mpuEnabled = system_state.mpuEnabled;
+    info.fpuEnabled = system_state.fpuEnabled;
+    info.icacheEnabled = system_state.icacheEnabled;
+    info.dcacheEnabled = system_state.dcacheEnabled;
+    info.prefetchEnabled = system_state.prefetchEnabled;
+    info.currentPowerMode = system_state.currentPowerMode;
+    info.flashLatency = system_state.flashLatency;
     info.uptimeMs = GetUptime();
-    info.resetCause = system_state.reset_cause;
+    info.resetCause = system_state.resetCause;
     
     return Platform::Status::OK;
 }
@@ -620,7 +663,7 @@ Platform::Status SystemManagerImpl::ConfigureMPURegion(uint8_t region, uint32_t 
         return Platform::Status::NOT_INITIALIZED;
     }
     
-    if (!system_state.mpu_enabled) {
+    if (!system_state.mpuEnabled) {
         return Platform::Status::ERROR;
     }
     
@@ -661,9 +704,6 @@ Platform::Status SystemManagerImpl::ConfigureMPURegion(uint8_t region, uint32_t 
 
 // Read from a system register
 Platform::Status SystemManagerImpl::ReadSystemRegister(uint32_t reg_addr, uint32_t& value) const {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
     
     // Check if the register address is valid
     if (reg_addr % 4 != 0) {
@@ -678,10 +718,7 @@ Platform::Status SystemManagerImpl::ReadSystemRegister(uint32_t reg_addr, uint32
 
 // Write to a system register
 Platform::Status SystemManagerImpl::WriteSystemRegister(uint32_t reg_addr, uint32_t value) {
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
+
     // Check if the register address is valid
     if (reg_addr % 4 != 0) {
         return Platform::Status::INVALID_PARAM; // Must be 4-byte aligned
@@ -717,15 +754,13 @@ Platform::Status SystemManagerImpl::ConfigureSystemClock() {
     
     // Get the actual system and bus clocks that were set
     uint32_t system_clock;
-    status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_CLOCK_FREQUENCY, &system_clock);
+    status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_SYS_CLOCK_FREQUENCY, &system_clock);
     
     if (status != Platform::Status::OK) {
         return status;
     }
 
-
     // Update system state with the actual clock frequencies
-
     Platform::RCC::SysCLockFreqs clock_freqs;
     status = rcc_interface->Control(Platform::RCC::RCC_CTRL_GET_ALL_CLOCK_FREQUENCIES, &clock_freqs);
 
@@ -733,10 +768,10 @@ Platform::Status SystemManagerImpl::ConfigureSystemClock() {
         return status;
     }
 
-    system_state.system_clock_freq = clock_freqs.systemClock;
-    system_state.ahb_clock_freq = clock_freqs.ahbClock;
-    system_state.apb1_clock_freq = clock_freqs.apb1Clock;
-    system_state.apb2_clock_freq = clock_freqs.apb2Clock;
+    system_state.systemClock = clock_freqs.systemClock;
+    system_state.ahbClock = clock_freqs.ahbClock;
+    system_state.apb1Clock = clock_freqs.apb1Clock;
+    system_state.apb2Clock = clock_freqs.apb2Clock;
     
     Platform::RCC::RccClockSource clock_source;
     // Update clock source and PLL status in system state
@@ -745,8 +780,8 @@ Platform::Status SystemManagerImpl::ConfigureSystemClock() {
         return status;
     }
 
-    system_state.clock_source = clock_source;
-    system_state.pll_enabled = config.SysClockConfig.pllConfig.autoCalculate;
+    system_state.clockSource = clock_source;
+    system_state.pllEnabled = config.SysClockConfig.pllConfig.autoCalculate;
     
     return Platform::Status::OK;
 }
@@ -757,7 +792,7 @@ Platform::Status SystemManagerImpl::ConfigureFlashLatency(uint32_t system_clock_
         return Platform::Status::ERROR;
     }
     // Calculate appropriate latency based on system clock if auto mode is selected
-    uint8_t flash_wait_states;
+    Platform::FLASH::FlashLatency flash_wait_states;
     
     if (latency == Platform::FLASH::FlashLatency::AUTOCALCULATE) {
         // For STM32F401 (3.3V operation):
@@ -766,17 +801,17 @@ Platform::Status SystemManagerImpl::ConfigureFlashLatency(uint32_t system_clock_
         // 2 WS: 48 MHz < HCLK ≤ 72 MHz
         // 3 WS: 72 MHz < HCLK ≤ 84 MHz
         if (system_clock_freq <= 24000000) {
-            flash_wait_states = 0;
+            flash_wait_states = Platform::FLASH::FlashLatency::WS0;
         } else if (system_clock_freq <= 48000000) {
-            flash_wait_states = 1;
+            flash_wait_states = Platform::FLASH::FlashLatency::WS1;
         } else if (system_clock_freq <= 72000000) {
-            flash_wait_states = 2;
+            flash_wait_states = Platform::FLASH::FlashLatency::WS2;
         } else {
-            flash_wait_states = 3; // For up to 84 MHz
+            flash_wait_states = Platform::FLASH::FlashLatency::WS3; // For up to 84 MHz
         }
     } else {
         // Use the provided latency value
-        flash_wait_states = static_cast<uint8_t>(latency);
+        flash_wait_states = latency;
     }
     
 
@@ -802,15 +837,15 @@ Platform::Status SystemManagerImpl::ConfigureFlashLatency(uint32_t system_clock_
     }
 
     // Verify that the latency was set correctly
-    if ((flash_regs->ACR & static_cast<uint32_t>(Platform::FLASH::ACR::LATENCY_MSK)) != flash_wait_states) {
+    if ((flash_regs->ACR & static_cast<uint32_t>(Platform::FLASH::ACR::LATENCY_MSK)) != static_cast<uint32_t>(flash_wait_states)) {
         return Platform::Status::ERROR;
     }
     
     // Update system state
-    system_state.flash_latency = flash_wait_states;
-    system_state.prefetch_enabled = config.FlashConfig.prefetch_enable;
-    system_state.icache_enabled = config.FlashConfig.icache_enable;
-    system_state.dcache_enabled = config.FlashConfig.dcache_enable;
+    system_state.flashLatency = flash_wait_states;
+    system_state.prefetchEnabled = config.FlashConfig.prefetch_enable;
+    system_state.icacheEnabled = config.FlashConfig.icache_enable;
+    system_state.dcacheEnabled = config.FlashConfig.dcache_enable;
     
     return Platform::Status::OK;
 }
@@ -825,7 +860,7 @@ Platform::Status SystemManagerImpl::ConfigureSysTick(uint32_t interval_us) {
     systick_interface = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();
     
     // Calculate reload value based on system clock and desired interval
-    uint32_t reload_value = (system_state.system_clock_freq / 1000000) * interval_us;
+    uint32_t reload_value = (system_state.systemClock / 1000000) * interval_us;
     
     // Check if reload value is within valid range (24-bit counter)
     if (reload_value > 0x00FFFFFF) {
@@ -875,7 +910,7 @@ Platform::Status SystemManagerImpl::ConfigureMPU() {
     // Check if MPU is present
     if ((*mpu_type & 0xFF) == 0) {
         // MPU not present in this device
-        system_state.mpu_enabled = false;
+        system_state.mpuEnabled = false;
         return Platform::Status::NOT_SUPPORTED;
     }
     
@@ -892,14 +927,14 @@ Platform::Status SystemManagerImpl::ConfigureMPU() {
     // *mpu_ctrl = (1 << 0) | (1 << 2);
     
     // Update system state
-    system_state.mpu_enabled = true;
+    system_state.mpuEnabled = true;
     
     return Platform::Status::OK;
 }
 
 // Configure FPU if enabled
 Platform::Status SystemManagerImpl::ConfigureFPU() {
-    if (!initialized || !config.enableFPU) {
+    if (!config.enableFPU) {
         return Platform::Status::OK;
     }
     
@@ -923,7 +958,7 @@ Platform::Status SystemManagerImpl::ConfigureFPU() {
     __asm volatile("ISB");
     
     // Update system state
-    system_state.fpu_enabled = true;
+    system_state.fpuEnabled = true;
     
     return Platform::Status::OK;
 }
@@ -937,7 +972,7 @@ Platform::Status SystemManagerImpl::ConfigureCache() {
     }
     
     Platform::FLASH::FlashConfig flash_config = {
-        .latency = static_cast<Platform::FLASH::FlashLatency>(system_state.flash_latency),
+        .latency = static_cast<Platform::FLASH::FlashLatency>(system_state.flashLatency),
         .prefetch_enable = config.FlashConfig.prefetch_enable,
         .icache_enable = config.FlashConfig.icache_enable,
         .dcache_enable = config.FlashConfig.dcache_enable,
@@ -951,10 +986,10 @@ Platform::Status SystemManagerImpl::ConfigureCache() {
     }
 
     // Update system state
-    system_state.flash_latency = static_cast<uint32_t>(flash_config.latency);
-    system_state.prefetch_enabled = flash_config.prefetch_enable;
-    system_state.icache_enabled = flash_config.icache_enable;
-    system_state.dcache_enabled = flash_config.dcache_enable;
+    system_state.flashLatency = flash_config.latency;
+    system_state.prefetchEnabled = flash_config.prefetch_enable;
+    system_state.icacheEnabled = flash_config.icache_enable;
+    system_state.dcacheEnabled = flash_config.dcache_enable;
     
     return Platform::Status::OK;
 }

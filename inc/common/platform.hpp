@@ -68,7 +68,7 @@ constexpr uint32_t TPI_BASE = (SCS_BASE + 0x0200UL);         // Trace Port Inter
 constexpr uint32_t ETM_BASE = (SCS_BASE + 0x0E00UL);         // Embedded Trace Macrocell Base Address
 constexpr uint32_t ITM_BASE = (SCS_BASE + 0x0000UL);         // Instrumentation Trace Macrocell Base Address
 constexpr uint32_t MPU_BASE = (SCS_BASE + 0x0D90UL);         // Memory Protection Unit Base Address
-constexpr uint32_t FPU_BASE = (SCS_BASE + 0x0F30UL);         // Floating Point Unit Base Address
+constexpr uint32_t FPU_BASE = (SCS_BASE + 0x0F34UL);         // Floating Point Unit Base Address
 constexpr uint32_t TPIU_BASE = (SCS_BASE + 0x0300UL);        // Trace Port Interface Unit Base Address
 constexpr uint32_t ETB_BASE = (SCS_BASE + 0x0F00UL);         // Embedded Trace Buffer Base Address
 constexpr uint32_t FPB_BASE = (SCS_BASE + 0x0300UL);         // Flash Patch and Breakpoint Base Address
@@ -85,7 +85,7 @@ inline void clearBit(volatile RegType& reg, BitType bit) {
 template<typename RegType, typename BitType>
 inline void setBit(volatile RegType& reg, BitType bit) {
     
-    reg &= ~static_cast<RegType>(bit);
+    reg |= static_cast<RegType>(bit);
 }
 
 template<typename T>

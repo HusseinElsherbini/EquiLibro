@@ -201,84 +201,48 @@ namespace RCC {
         uint8_t bitPosition;
     };
     enum class RccPeripheral : uint32_t {
-        // AHB1 peripherals
-        GPIOA = 0x00000001,
-        GPIOB = 0x00000002,
-        GPIOC = 0x00000003,
-        GPIOD = 0x00000004,
-        GPIOE = 0x00000005,
-        GPIOH = 0x00000006,
-        CRC = 0x00000007,
-        DMA1 = 0x00000008,
-        DMA2 = 0x00000009,
+        // AHB1 peripherals - actual bit positions in RCC_AHB1ENR
+        GPIOA = 0x00000000,  // Bit 0
+        GPIOB = 0x00000001,  // Bit 1
+        GPIOC = 0x00000002,  // Bit 2
+        GPIOD = 0x00000003,  // Bit 3
+        GPIOE = 0x00000004,  // Bit 4
+        GPIOH = 0x00000007,  // Bit 7
+        CRC = 0x0000000C,    // Bit 12
+        DMA1 = 0x00000015,   // Bit 21
+        DMA2 = 0x00000016,   // Bit 22
         
-        // AHB2 peripherals
-        OTGFS = 0x00000101,
+        // AHB2 peripherals - actual bit positions in RCC_AHB2ENR
+        OTGFS = 0x00000107,  // Bit 7
         
-        // APB1 peripherals
-        TIM2 = 0x00000201,
-        TIM3 = 0x00000202,
-        TIM4 = 0x00000203,
-        TIM5 = 0x00000204,
-        WWDG = 0x00000205,
-        SPI2 = 0x00000206,
-        SPI3 = 0x00000207,
-        USART2 = 0x00000208,
-        I2C1 = 0x00000209,
-        I2C2 = 0x0000020A,
-        I2C3 = 0x0000020B,
-        PWR = 0x0000020C,
+        // APB1 peripherals - actual bit positions in RCC_APB1ENR
+        TIM2 = 0x00000200,   // Bit 0
+        TIM3 = 0x00000201,   // Bit 1
+        TIM4 = 0x00000202,   // Bit 2
+        TIM5 = 0x00000203,   // Bit 3
+        WWDG = 0x0000020B,   // Bit 11
+        SPI2 = 0x0000020E,   // Bit 14
+        SPI3 = 0x0000020F,   // Bit 15
+        USART2 = 0x00000211, // Bit 17
+        I2C1 = 0x00000215,   // Bit 21
+        I2C2 = 0x00000216,   // Bit 22
+        I2C3 = 0x00000217,   // Bit 23
+        PWR = 0x0000021C,    // Bit 28
         
-        // APB2 peripherals
-        TIM1 = 0x00000301,
-        USART1 = 0x00000302,
-        USART6 = 0x00000303,
-        ADC1 = 0x00000304,
-        SDIO = 0x00000305,
-        SPI1 = 0x00000306,
-        SPI4 = 0x00000307,
-        SYSCFG = 0x00000308,
-        TIM9 = 0x00000309,
-        TIM10 = 0x0000030A,
-        TIM11 = 0x0000030B
+        // APB2 peripherals - actual bit positions in RCC_APB2ENR
+        TIM1 = 0x00000300,   // Bit 0
+        USART1 = 0x00000304, // Bit 4
+        USART6 = 0x00000305, // Bit 5
+        ADC1 = 0x00000308,   // Bit 8
+        SDIO = 0x0000030B,   // Bit 11
+        SPI1 = 0x0000030C,   // Bit 12
+        SPI4 = 0x0000030D,   // Bit 13
+        SYSCFG = 0x0000030E, // Bit 14
+        TIM9 = 0x00000310,   // Bit 16
+        TIM10 = 0x00000311,  // Bit 17
+        TIM11 = 0x00000312   // Bit 18
     };
     
-    static const std::unordered_map<RccPeripheral, RccPeripheralInfo> peripheralMap = {
-        {RccPeripheral::GPIOA, {RccBusType::AHB1, 0}},
-        {RccPeripheral::GPIOB, {RccBusType::AHB1, 1}},
-        {RccPeripheral::GPIOC, {RccBusType::AHB1, 2}},
-        {RccPeripheral::GPIOD, {RccBusType::AHB1, 3}},
-        {RccPeripheral::GPIOE, {RccBusType::AHB1, 4}},
-        {RccPeripheral::GPIOH, {RccBusType::AHB1, 7}},
-        {RccPeripheral::CRC, {RccBusType::AHB1, 12}},
-        {RccPeripheral::DMA1, {RccBusType::AHB1, 21}},
-        {RccPeripheral::DMA2, {RccBusType::AHB1, 22}},
-        {RccPeripheral::OTGFS, {RccBusType::AHB2, 7}},
-        {RccPeripheral::TIM2, {RccBusType::APB1, 0}},
-        {RccPeripheral::TIM3, {RccBusType::APB1, 1}},
-        {RccPeripheral::TIM4, {RccBusType::APB1, 2}},
-        {RccPeripheral::TIM5, {RccBusType::APB1, 3}},
-        {RccPeripheral::WWDG, {RccBusType::APB1, 11}},
-        {RccPeripheral::SPI2, {RccBusType::APB1, 14}},
-        {RccPeripheral::SPI3, {RccBusType::APB1, 15}},
-        {RccPeripheral::USART2, {RccBusType::APB1, 17}},
-        {RccPeripheral::I2C1, {RccBusType::APB1, 21}},
-        {RccPeripheral::I2C2, {RccBusType::APB1, 22}},
-        {RccPeripheral::I2C3, {RccBusType::APB1, 23}},
-        {RccPeripheral::PWR, {RccBusType::APB1, 28}},
-        {RccPeripheral::TIM1, {RccBusType::APB2, 0}},
-        {RccPeripheral::USART1, {RccBusType::APB2, 4}},
-        {RccPeripheral::USART6, {RccBusType::APB2, 5}},
-        {RccPeripheral::ADC1, {RccBusType::APB2, 8}},
-        {RccPeripheral::SDIO, {RccBusType::APB2, 11}},
-        {RccPeripheral::SPI1, {RccBusType::APB2, 12}},
-        {RccPeripheral::SPI4, {RccBusType::APB2, 13}},
-        {RccPeripheral::SYSCFG, {RccBusType::APB2, 14}},
-        {RccPeripheral::TIM9, {RccBusType::APB2, 16}},
-        {RccPeripheral::TIM10, {RccBusType::APB2, 17}},
-        {RccPeripheral::TIM11, {RccBusType::APB2, 18}},  
-    };
-
     // Get RCC registers
     inline Registers* getRegisters() {
         return reinterpret_cast<Registers*>(RCC_BASE);

@@ -75,7 +75,30 @@ Platform::Status TimerInterface::Init(void* config) {
     tim->CCMR2 = 0;
     tim->CCER = 0;
     tim->CNT = 0;
-    
+    if (timer_config->desiredFrequency > 0) {
+        // Get the actual timer clock frequency from RCC
+        auto& rcc = Platform::RCC::RccInterface::GetInstance();
+        uint32_t timer_clock;
+        
+        // Determine which bus this timer is on
+        if (this->timer_instance == TimerInstance::TIM1 || 
+            this->timer_instance == TimerInstance::TIM9 || 
+            this->timer_instance == TimerInstance::TIM10 || 
+            this->timer_instance == TimerInstance::TIM11) {
+            timer_clock = rcc.GetApb2ClockFrequency();
+        } else {
+            timer_clock = rcc.GetApb1ClockFrequency();
+        }
+        
+        // For timers on APB1/APB2 with a prescaler, the actual timer clock might be multiplied
+        if (timer_clock < rcc.GetSystemClockFrequency()) {
+            // When APB prescaler is not 1, timer clock is doubled
+            timer_clock *= 2;
+        }
+        
+        // Calculate the prescaler to achieve the desired frequency
+        timer_config->prescaler = (timer_clock / timer_config->desiredFrequency) - 1;
+    }   
     // Configure basic timer parameters
     // Set prescaler
     tim->PSC = timer_config->prescaler;

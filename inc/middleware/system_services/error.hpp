@@ -11,6 +11,7 @@ namespace SystemServices {
     namespace ERROR {
 
             constexpr uint8_t MAX_ERROR_HANDLERS = 5;
+            constexpr size_t ERROR_HISTORY_SIZE = 32;  // Adjust based on memory constraints
             /**
              * @brief Error status enumeration
              * 
@@ -283,7 +284,6 @@ namespace SystemServices {
         
         class ErrorManager {
             private:
-                static constexpr size_t ERROR_HISTORY_SIZE = 32;  // Adjust based on memory constraints
                 static std::array<ErrorInfo, ERROR_HISTORY_SIZE> error_history;
                 static std::atomic<size_t> error_index;
                 static std::array<IErrorHandler*, MAX_ERROR_HANDLERS> error_handlers;

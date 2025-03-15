@@ -13,11 +13,6 @@ GpioToggleApp::GpioToggleApp()
       is_pin_high(false),
       last_toggle_time(0)
     {
-    
-    gpio_interface = &Platform::GPIO::GpioInterface::GetInstance();
-    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
-
-    config = {};
         
 }
 
@@ -28,11 +23,22 @@ GpioToggleApp::~GpioToggleApp() {
     }
 }
 
+GpioToggleApp& GpioToggleApp::GetGpioToggleApp() {
+    // This will be created after main() starts, when heap is available
+    static APP::GpioToggleApp instance;
+    return instance;
+}
+
 AppState GpioToggleApp::GetState() const {
     return current_state;
 }
 
 Platform::Status GpioToggleApp::Init(void* config_ptr) {
+
+    gpio_interface = &Platform::GPIO::GpioInterface::GetInstance();
+    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
+
+    config = {};
     // Check if dependencies are available
     if (!gpio_interface || !timing_service) {
         current_state = AppState::Error;
