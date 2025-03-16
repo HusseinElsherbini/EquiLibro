@@ -11,13 +11,11 @@ namespace GPIO {
     constexpr uint32_t GPIOE_BASE = (AHB1PERIPH_BASE + 0x1000UL);
     constexpr uint32_t GPIOH_BASE = (AHB1PERIPH_BASE + 0x1C00UL);
 
-
-
     
     /**
      * GPIO pin state enumeration
      */
-    enum class GpioPinState {
+    enum class GpioPinState : uint8_t {
         Low = 0,
         High = 1
     };

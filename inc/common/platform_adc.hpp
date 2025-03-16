@@ -83,9 +83,83 @@ namespace Platform {
             Timer8_TRGO = 14UL,
             EXTI_Line11 = 15UL
         };
+        struct SQR1_Bits {
+            // Sequence length (L) - bits [23:20]
+            // Defines the total number of conversions in the regular sequence (actual length = L+1)
+            static constexpr uint32_t L_POS = 20;         // Starting bit position
+            static constexpr uint32_t L_MSK = 0xF00000;   // Mask for the field (4 bits: 23-20)
+            
+            // 16th conversion in sequence (SQ16) - bits [19:15]
+            static constexpr uint32_t SQ16_POS = 15;      // Starting bit position
+            static constexpr uint32_t SQ16_MSK = 0xF8000; // Mask for the field (5 bits: 19-15)
+            
+            // 15th conversion in sequence (SQ15) - bits [14:10]
+            static constexpr uint32_t SQ15_POS = 10;      // Starting bit position
+            static constexpr uint32_t SQ15_MSK = 0x7C00;  // Mask for the field (5 bits: 14-10)
+            
+            // 14th conversion in sequence (SQ14) - bits [9:5]
+            static constexpr uint32_t SQ14_POS = 5;       // Starting bit position
+            static constexpr uint32_t SQ14_MSK = 0x3E0;   // Mask for the field (5 bits: 9-5)
+            
+            // 13th conversion in sequence (SQ13) - bits [4:0]
+            static constexpr uint32_t SQ13_POS = 0;       // Starting bit position
+            static constexpr uint32_t SQ13_MSK = 0x1F;    // Mask for the field (5 bits: 4-0)
+        };
 
+        struct SQR2_Bits {
+            // 12th conversion in sequence (SQ12) - bits [29:25]
+            static constexpr uint32_t SQ12_POS = 25;        // Starting bit position
+            static constexpr uint32_t SQ12_MSK = 0x3E000000; // Mask for the field (5 bits: 29-25)
+            
+            // 11th conversion in sequence (SQ11) - bits [24:20]
+            static constexpr uint32_t SQ11_POS = 20;        // Starting bit position
+            static constexpr uint32_t SQ11_MSK = 0x1F00000;  // Mask for the field (5 bits: 24-20)
+            
+            // 10th conversion in sequence (SQ10) - bits [19:15]
+            static constexpr uint32_t SQ10_POS = 15;        // Starting bit position
+            static constexpr uint32_t SQ10_MSK = 0xF8000;    // Mask for the field (5 bits: 19-15)
+            
+            // 9th conversion in sequence (SQ9) - bits [14:10]
+            static constexpr uint32_t SQ9_POS = 10;         // Starting bit position
+            static constexpr uint32_t SQ9_MSK = 0x7C00;     // Mask for the field (5 bits: 14-10)
+            
+            // 8th conversion in sequence (SQ8) - bits [9:5]
+            static constexpr uint32_t SQ8_POS = 5;          // Starting bit position
+            static constexpr uint32_t SQ8_MSK = 0x3E0;      // Mask for the field (5 bits: 9-5)
+            
+            // 7th conversion in sequence (SQ7) - bits [4:0]
+            static constexpr uint32_t SQ7_POS = 0;          // Starting bit position
+            static constexpr uint32_t SQ7_MSK = 0x1F;       // Mask for the field (5 bits: 4-0)
+        };
+
+        // ADC Regular Sequence Register 3 (SQR3) bit definitions
+        struct SQR3_Bits {
+            // 6th conversion in sequence (SQ6) - bits [29:25]
+            static constexpr uint32_t SQ6_POS = 25;         // Starting bit position
+            static constexpr uint32_t SQ6_MSK = 0x3E000000; // Mask for the field (5 bits: 29-25)
+            
+            // 5th conversion in sequence (SQ5) - bits [24:20]
+            static constexpr uint32_t SQ5_POS = 20;         // Starting bit position
+            static constexpr uint32_t SQ5_MSK = 0x1F00000;  // Mask for the field (5 bits: 24-20)
+            
+            // 4th conversion in sequence (SQ4) - bits [19:15]
+            static constexpr uint32_t SQ4_POS = 15;         // Starting bit position
+            static constexpr uint32_t SQ4_MSK = 0xF8000;    // Mask for the field (5 bits: 19-15)
+            
+            // 3rd conversion in sequence (SQ3) - bits [14:10]
+            static constexpr uint32_t SQ3_POS = 10;         // Starting bit position
+            static constexpr uint32_t SQ3_MSK = 0x7C00;     // Mask for the field (5 bits: 14-10)
+            
+            // 2nd conversion in sequence (SQ2) - bits [9:5]
+            static constexpr uint32_t SQ2_POS = 5;          // Starting bit position
+            static constexpr uint32_t SQ2_MSK = 0x3E0;      // Mask for the field (5 bits: 9-5)
+            
+            // 1st conversion in sequence (SQ1) - bits [4:0]
+            static constexpr uint32_t SQ1_POS = 0;          // Starting bit position
+            static constexpr uint32_t SQ1_MSK = 0x1F;       // Mask for the field (5 bits: 4-0)
+        };
         // ADC register structure
-        struct ADC_Registers {
+        struct Registers {
             volatile uint32_t SR;           // ADC status register
             volatile uint32_t CR1;          // ADC control register 1
             volatile uint32_t CR2;          // ADC control register 2
@@ -236,8 +310,8 @@ namespace Platform {
         }
 
         // Get ADC registers
-        inline ADC_Registers* getADC1Registers() {
-            return reinterpret_cast<ADC_Registers*>(ADC1_BASE);
+        inline Registers* getADC1Registers() {
+            return reinterpret_cast<Registers*>(ADC1_BASE);
         }
 
         // Get ADC common registers
@@ -261,7 +335,7 @@ namespace Platform {
         constexpr uint32_t getBitValue(CCR bit) {
             return static_cast<uint32_t>(bit);
         }
-
+        
         // Operator overloads for combining flags
         constexpr SR operator|(SR a, SR b) {
             return static_cast<SR>(

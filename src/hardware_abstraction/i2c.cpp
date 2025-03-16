@@ -8,6 +8,7 @@
 #include <algorithm>
 #include "os/mutex.hpp"
 
+
 namespace Platform {
 namespace I2C {
 
@@ -162,6 +163,47 @@ Platform::Status I2CInterface::ConfigurePins() {
     return Platform::Status::OK;
 }
 
+Platform::Status I2CInterface::ConfigureInterrupts(bool enable) {
+    if (!initialized) {
+        return Platform::Status::NOT_INITIALIZED;
+    }
+    
+    // Only proceed if interrupts were prepared during initialization
+    if (!this->config.enable_interrupts) {
+        return Platform::Status::NOT_SUPPORTED;
+    }
+    
+    // Determine interrupt lines for this instance
+    Platform::CMSIS::NVIC::IRQn ev_irq, er_irq;
+    
+    switch (this->instance) {
+        case I2CInstance::I2C1:
+            ev_irq = Platform::CMSIS::NVIC::IRQn::I2C1_EV;
+            er_irq = Platform::CMSIS::NVIC::IRQn::I2C1_ER;
+            break;
+        case I2CInstance::I2C2:
+            ev_irq = Platform::CMSIS::NVIC::IRQn::I2C2_EV;
+            er_irq = Platform::CMSIS::NVIC::IRQn::I2C2_ER;
+            break;
+        case I2CInstance::I2C3:
+            ev_irq = Platform::CMSIS::NVIC::IRQn::I2C3_EV;
+            er_irq = Platform::CMSIS::NVIC::IRQn::I2C3_ER;
+            break;
+        default:
+            return Platform::Status::INVALID_PARAM;
+    }
+    
+    // Enable or disable interrupts in NVIC as requested
+    if (enable) {
+        Platform::CMSIS::NVIC::enableIRQ(ev_irq);
+        Platform::CMSIS::NVIC::enableIRQ(er_irq);
+    } else {
+        Platform::CMSIS::NVIC::disableIRQ(ev_irq);
+        Platform::CMSIS::NVIC::disableIRQ(er_irq);
+    }
+    
+    return Platform::Status::OK;
+}
 // Calculate I2C timing parameters based on peripheral clock and desired speed
 Platform::Status I2CInterface::CalculateTimingParameters() {
     // Get I2C registers
@@ -648,6 +690,8 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
     // For non-blocking operations, we'll use interrupts if they're enabled
     if (non_blocking && config.enable_interrupts) {
 
+        // enable interrupts
+        ConfigureInterrupts(true);
         // Wait until bus is free (this part is still blocking)
         uint64_t start_time = timing_service->GetMilliseconds();
 
@@ -677,6 +721,9 @@ Platform::Status I2CInterface::MasterTransmit(uint16_t dev_addr, const uint8_t* 
         // Now return immediately - the rest will be handled by interrupts
         return Platform::Status::OK;
     }
+
+    // disable interrupts 
+    ConfigureInterrupts(false);
     // *** Start the transfer sequence ***
     
     // 1. Send START condition
@@ -837,6 +884,8 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
 
     // For non-blocking operations, we'll use interrupts if they're enabled
     if (non_blocking && config.enable_interrupts) {
+
+        ConfigureInterrupts(true);
         // Wait until bus is free (this part is still blocking)
         uint64_t start_time = timing_service->GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
@@ -865,6 +914,8 @@ Platform::Status I2CInterface::MasterReceive(uint16_t dev_addr, uint8_t* data, u
         // Now return immediately - the rest will be handled by interrupts
         return Platform::Status::OK;
     }
+
+    ConfigureInterrupts(false);
     // *** Start the transfer sequence ***
     
     // 1. Send START condition
@@ -1095,6 +1146,8 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
     // For non-blocking operations, we'll use interrupts if they're enabled
 
     if (non_blocking && config.enable_interrupts) {
+
+        ConfigureInterrupts(true);
         // Wait until bus is free (this part is still blocking)
         uint64_t start_time = timing_service->GetMilliseconds();
         while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
@@ -1123,6 +1176,8 @@ Platform::Status I2CInterface::MemoryWrite(uint16_t dev_addr, uint16_t mem_addr,
         // Now return immediately - the rest will be handled by interrupts
         return Platform::Status::OK;
     }
+
+    ConfigureInterrupts(false);
     // *** Start the transfer sequence ***
     
     // 1. Send START condition
@@ -1301,6 +1356,8 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     
     // For non-blocking operations, we'll use interrupts if they're enabled
     if (non_blocking && config.enable_interrupts) {
+
+        ConfigureInterrupts(true);
         // Wait until bus is free (this part is still blocking)
         // We could make this part non-blocking too with more state machine complexity
         uint64_t start_time = timing_service->GetMilliseconds();
@@ -1332,7 +1389,7 @@ Platform::Status I2CInterface::MemoryRead(uint16_t dev_addr, uint16_t mem_addr, 
     }
     
     // For blocking operations, use the polling approach
-    
+    ConfigureInterrupts(false);
     // Wait until bus is free
     uint64_t start_time = timing_service->GetMilliseconds();
     while (i2c->SR2 & Platform::I2C::getBitValue(Platform::I2C::SR2::BUSY)) {
@@ -1880,22 +1937,131 @@ void I2CInterface::HandleError(I2CError error) {
         );
     }
 }
-
-// I2C interrupt handlers (Event)
+}
+}// I2C interrupt handlers (Event)
 void I2C1_EV_IRQHandler() {
     // Get I2C instance
-    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C1);
+    Platform::I2C::I2CInterface* i2c_interface = &Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C1);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
     
-    // Forward to the instance's event handler
-    // Implement the interrupt handling logic here if needed
-}
+    Platform::I2C::Registers* i2c = i2c_interface->GetI2CRegisters();
+    uint32_t sr1 = i2c->SR1;
+    uint32_t sr2 = i2c->SR2;
 
+    // Start condition generated
+    if (sr1 & Platform::I2C::getBitValue(Platform::I2C::SR1::SB)) {
+        if (i2c_interface->transfer_state.state == Platform::I2C::CurrentTransferState::RepeatedStartSent) {
+            // Send slave address with read bit
+            i2c->DR = (i2c_interface->transfer_state.device_address << 1) | 0x01;
+            i2c_interface->transfer_state.repeated_start = false;
+            i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::AddrSentR;
+        } else {
+            // Send slave address with write bit
+            i2c->DR = (i2c_interface->transfer_state.device_address << 1) & 0xFE;
+            i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::AddrSentW;
+        }
+    }
+    // Address sent
+    else if (sr1 & Platform::I2C::getBitValue(Platform::I2C::SR1::ADDR)) {
+        if (i2c_interface->transfer_state.state == Platform::I2C::CurrentTransferState::AddrSentW) {
+            // Clear ADDR flag by reading SR1 and SR2
+            (void)i2c->SR1;
+            (void)i2c->SR2;
+            i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::RegAddrSent;
+        } 
+        else if(i2c_interface->transfer_state.state == Platform::I2C::CurrentTransferState::AddrSentR) {
+            if(i2c_interface->transfer_state.data_size > 1) {
+                // Enable ACK for multiple byte read
+                i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::ACK);                
+            }
+            else {
+                // Disable ACK and send stop for single byte read 
+                i2c->CR1 &= ~Platform::I2C::getBitValue(Platform::I2C::CR1::ACK);
+                i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::STOP);
+            }
+            
+            // Clear ADDR flag by reading SR1 and SR2
+            (void)i2c->SR1;
+            (void)i2c->SR2;
+            i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::Reading;
+        }
+    }
+    // Transmit interrupt (TXE) for write operation
+    else if(sr1 & Platform::I2C::getBitValue(Platform::I2C::SR1::TXE)) {
+        // If we just cleared the address flag, send target register
+        if(i2c_interface->transfer_state.state == Platform::I2C::CurrentTransferState::RegAddrSent) {
+            i2c->DR = i2c_interface->transfer_state.memory_address;  
+            i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::Writing;
+        }
+        // If target register sent, and this is a read op, generate restart
+        else if(i2c_interface->transfer_state.state == Platform::I2C::CurrentTransferState::Writing) {
+            if(i2c_interface->transfer_state.repeated_start) {
+                i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::START);
+                i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::RepeatedStartSent;               
+            }
+            else {
+                // Handle write data
+                if(i2c_interface->transfer_state.data_index == i2c_interface->transfer_state.data_size) {
+                    // Disable interrupts
+                    i2c->CR2 &= ~(Platform::I2C::getBitValue(Platform::I2C::CR2::ITEVTEN) | 
+                                 Platform::I2C::getBitValue(Platform::I2C::CR2::ITERREN) | 
+                                 Platform::I2C::getBitValue(Platform::I2C::CR2::ITBUFEN));
+                    // Send stop
+                    i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::STOP);
+                    i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::Idle;    
+                    i2c_interface->transfer_state.in_progress = false;
+                    
+                    // Call completion callback if registered
+                    if (i2c_interface->callbacks[static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete)].enabled) {
+                        i2c_interface->callbacks[static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete)].callback(
+                            i2c_interface->callbacks[static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete)].param
+                        );
+                    }
+                }
+                else {
+                    i2c->DR = i2c_interface->transfer_state.data_buffer[i2c_interface->transfer_state.data_index++]; 
+                }
+            }   
+        }
+    }
+    // Receive interrupt (RXNE) for read operation
+    else if (sr1 & Platform::I2C::getBitValue(Platform::I2C::SR1::RXNE)) {
+        // Read the data and increment buffer index
+        i2c_interface->transfer_state.data_buffer[i2c_interface->transfer_state.data_index++] = i2c->DR;
+        
+        // If all bytes received
+        if(i2c_interface->transfer_state.data_index == i2c_interface->transfer_state.data_size) {
+            if(i2c_interface->transfer_state.data_size > 1) {
+                // Generate stop after receiving last byte 
+                i2c->CR1 |= Platform::I2C::getBitValue(Platform::I2C::CR1::STOP);
+            }
+            
+            // Disable interrupts
+            i2c->CR2 &= ~(Platform::I2C::getBitValue(Platform::I2C::CR2::ITEVTEN) | 
+                         Platform::I2C::getBitValue(Platform::I2C::CR2::ITERREN) | 
+                         Platform::I2C::getBitValue(Platform::I2C::CR2::ITBUFEN));
+            
+            i2c_interface->transfer_state.state = Platform::I2C::CurrentTransferState::Idle;
+            i2c_interface->transfer_state.in_progress = false;
+            
+            // Call completion callback if registered
+            if (i2c_interface->callbacks[static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete)].enabled) {
+                i2c_interface->callbacks[static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete)].callback(
+                    i2c_interface->callbacks[static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete)].param
+                );
+            }
+        }
+        // If byte before last, send NACK
+        else if(i2c_interface->transfer_state.data_index == i2c_interface->transfer_state.data_size - 1) {
+            i2c->CR1 &= ~Platform::I2C::getBitValue(Platform::I2C::CR1::ACK);  // Disable ACK
+        }
+    }
+}
 void I2C2_EV_IRQHandler() {
     // Get I2C instance
-    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C2);
+    Platform::I2C::I2CInterface* i2c_interface = &Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C2);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1906,7 +2072,7 @@ void I2C2_EV_IRQHandler() {
 
 void I2C3_EV_IRQHandler() {
     // Get I2C instance
-    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C3);
+    Platform::I2C::I2CInterface* i2c_interface = &Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C3);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1918,7 +2084,7 @@ void I2C3_EV_IRQHandler() {
 // I2C interrupt handlers (Error)
 void I2C1_ER_IRQHandler() {
     // Get I2C instance
-    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C1);
+    Platform::I2C::I2CInterface* i2c_interface = &Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C1);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1929,7 +2095,7 @@ void I2C1_ER_IRQHandler() {
 
 void I2C2_ER_IRQHandler() {
     // Get I2C instance
-    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C2);
+    Platform::I2C::I2CInterface* i2c_interface = &Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C2);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
@@ -1941,14 +2107,11 @@ void I2C2_ER_IRQHandler() {
 void I2C3_ER_IRQHandler() {
 
     // Get I2C instance
-    I2CInterface* i2c_interface = &I2CInterface::GetInstance(I2CInstance::I2C3);
+    Platform::I2C::I2CInterface* i2c_interface = &Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C3);
     if (!i2c_interface || !i2c_interface->initialized) {
         return;
     }
     
     // Forward to the instance's error handler
     // Implement the error handling logic here if needed
-}
-
-}
 }

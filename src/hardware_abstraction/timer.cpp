@@ -296,6 +296,9 @@ Platform::Status TimerInterface::Stop() {
     return Platform::Status::OK;
 }
 
+Platform::TIM::TimerType Platform::TIM::TimerInterface::GetTimerType() const {
+    return timer_type;
+}
 // Implementation for TimerInterface::SetPeriod
 Platform::Status TimerInterface::SetPeriod(uint32_t period) {
     // Check if initialized
@@ -597,6 +600,13 @@ Platform::Status TimerInterface::ConfigureChannel(Platform::TIM::Registers* tim,
         ccer |= (1UL << (channel_shift + 2));
     }
     
+    // SET MOE BIT if using output capture 
+    if (timer_type == Platform::TIM::TimerType::Advanced && 
+        channelConfig.ocMode != TIM::OCMode::Frozen) {
+        
+        // Enable MOE bit in BDTR register
+        tim->BDTR |= Platform::TIM::getBitValue(Platform::TIM::BDTR::MOE);
+    }
     // Apply changes
     tim->CCER = ccer;
     
@@ -994,7 +1004,61 @@ Platform::Status TimerInterface::Control(TimerOperation operation, void* param) 
                 //UnlockAccess();
             }
             break;
+            case TimerOperation::SetMode:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            {
+                uint32_t mode = *static_cast<uint32_t*>(param);
+                Platform::TIM::Registers* tim = GetTimerRegister();
+                if (tim == nullptr) {
+                    return Platform::Status::ERROR;
+                }
+                
+                // Update CR1 register for one-pulse mode
+                if (mode == 1) {
+                    // Enable one-pulse mode
+                    tim->CR1 |= getBitValue(CR1::OPM);
+                } else {
+                    // Disable one-pulse mode
+                    tim->CR1 &= ~getBitValue(CR1::OPM);
+                }
+            }
+            break;
             
+        case TimerOperation::EnableChannel:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            {
+                Channel channel = *static_cast<Channel*>(param);
+                Platform::TIM::Registers* tim = GetTimerRegister();
+                if (tim == nullptr) {
+                    return Platform::Status::ERROR;
+                }
+                
+                // Enable channel in CCER register
+                uint32_t channel_bit = (static_cast<uint32_t>(channel) - 1) * 4;
+                tim->CCER |= (1UL << channel_bit);
+            }
+            break;
+
+        case TimerOperation::DisableChannel:
+            if (param == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            {
+                Channel channel = *static_cast<Channel*>(param);
+                Platform::TIM::Registers* tim = GetTimerRegister();
+                if (tim == nullptr) {
+                    return Platform::Status::ERROR;
+                }
+                
+                // Disable channel in CCER register
+                uint32_t channel_bit = (static_cast<uint32_t>(channel) - 1) * 4;
+                tim->CCER &= ~(1UL << channel_bit);
+            }
+            break;    
         default:
             return Platform::Status::NOT_SUPPORTED;
     }
@@ -1020,7 +1084,18 @@ Platform::Status TimerInterface::Control(uint32_t command, void* param) {
             
         case 0x0205: // TIMER_CTRL_SET_PRESCALER
             return Control(TimerOperation::SetPrescaler, param);
+
+        case 0x0210: // TIMER_CTRL_SET_MODE
+            return Control(TimerOperation::SetMode, param);
             
+        case 0x0211: // TIMER_CTRL_ENABLE_CHANNEL
+            return Control(TimerOperation::EnableChannel, param);
+            
+        case 0x0212: // TIMER_CTRL_DISABLE_CHANNEL
+            return Control(TimerOperation::DisableChannel, param);     
+
+        case 0x0206: // TIMER_CTRL_SET_COMPARE
+            return Control(TimerOperation::SetCompareValue, param);
         // Map other old commands...
             
         default:

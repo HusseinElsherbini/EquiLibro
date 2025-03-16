@@ -28,6 +28,9 @@ enum class TimerOperation {
     EnableCapture,
     DisableCapture,
     GetStatus,
+    SetMode,
+    EnableChannel,
+    DisableChannel,
 };
 constexpr uint32_t TIMER_CTRL_START = 0x0201;
 constexpr uint32_t TIMER_CTRL_STOP = 0x0202;
@@ -43,6 +46,9 @@ constexpr uint32_t TIMER_CTRL_ENABLE_CAPTURE = 0x020B;
 constexpr uint32_t TIMER_CTRL_DISABLE_CAPTURE = 0x020C;
 constexpr uint32_t TIMER_CTRL_GET_STATUS = 0x020D;
 constexpr uint32_t TIMER_CTRL_GET_FEATURES = 0x020E;
+constexpr uint32_t TIMER_CTRL_SET_MODE = 0x0210;
+constexpr uint32_t TIMER_CTRL_ENABLE_CHANNEL = 0x0211;
+constexpr uint32_t TIMER_CTRL_DISABLE_CHANNEL = 0x0212;
 /**
  * Timer capabilities/features enumeration
  * Represents the various functional capabilities that a timer might support

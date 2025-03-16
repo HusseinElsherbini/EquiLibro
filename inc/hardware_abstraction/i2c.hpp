@@ -8,8 +8,14 @@
 #include "os/mutex.hpp"
 #include <vector>
 #include <memory>
-#include "system_services/system_timing.hpp"        
-
+#include "system_services/system_timing.hpp"    
+   
+extern "C" void I2C1_EV_IRQHandler();
+extern "C" void I2C1_ER_IRQHandler();
+extern "C" void I2C2_EV_IRQHandler();
+extern "C" void I2C2_ER_IRQHandler();
+extern "C" void I2C3_EV_IRQHandler();
+extern "C" void I2C3_ER_IRQHandler();
 namespace Platform {
     namespace I2C {    
         
@@ -144,17 +150,18 @@ private:
     Platform::Status ReceiveByte(uint8_t& byte);
     Platform::Status SendStop();
     Platform::Status RecoverBus();
-    
+    Platform::Status ConfigureInterrupts(bool enable);
 
     // Deleted assignment operator
     I2CInterface(const I2CInterface&);
     I2CInterface& operator=(const I2CInterface&) = delete;    
     
+
+    
+public:
+
     // Factory method for getting I2C interface
     static I2CInterface& GetInstance(I2CInstance instance);
-    
-public:    
-
     // Constructor for limited instantiation
     explicit I2CInterface(I2CInstance instance);
     // Destructor
@@ -184,12 +191,12 @@ public:
 
     
     // Allow interrupt handlers to access private state
-    friend void I2C1_EV_IRQHandler();
-    friend void I2C1_ER_IRQHandler();
-    friend void I2C2_EV_IRQHandler();
-    friend void I2C2_ER_IRQHandler();
-    friend void I2C3_EV_IRQHandler();
-    friend void I2C3_ER_IRQHandler();
+    friend void ::I2C1_EV_IRQHandler();
+    friend void ::I2C1_ER_IRQHandler();
+    friend void ::I2C2_EV_IRQHandler();
+    friend void ::I2C2_ER_IRQHandler();
+    friend void ::I2C3_EV_IRQHandler();
+    friend void ::I2C3_ER_IRQHandler();
 };
 
 // I2C control command identifiers
