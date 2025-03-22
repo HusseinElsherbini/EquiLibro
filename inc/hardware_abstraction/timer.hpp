@@ -114,6 +114,7 @@ struct TimerConfig {
     uint32_t prescaler;           // Timer prescaler
     uint32_t period;              // Timer period (auto-reload value)
     bool autoReloadPreload;       // Auto-reload preload enable
+    bool enableInterrupt;
 };
 struct TimerChannelConfig {
     Channel channel;          // Timer channel

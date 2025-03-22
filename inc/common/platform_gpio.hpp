@@ -10,7 +10,8 @@ namespace GPIO {
     constexpr uint32_t GPIOD_BASE = (AHB1PERIPH_BASE + 0x0C00UL);
     constexpr uint32_t GPIOE_BASE = (AHB1PERIPH_BASE + 0x1000UL);
     constexpr uint32_t GPIOH_BASE = (AHB1PERIPH_BASE + 0x1C00UL);
-
+    constexpr uint32_t EXTI_BASE_ADDRESS = (APB2PERIPH_BASE + 0x3C00UL);
+    constexpr uint32_t SYSCFG_BASE_ADDRESS = (APB2PERIPH_BASE + 0x3800UL);
     
     /**
      * GPIO pin state enumeration
@@ -78,6 +79,11 @@ namespace GPIO {
         AF14 = 0x0E,
         AF15 = 0x0F
     };
+    enum class InterruptTrigger {
+        Rising,
+        Falling,
+        Both
+    }; 
     struct GpioConfig {
         Platform::GPIO::Port port;            // GPIO port (A, B, C, etc.)
         uint8_t pin;                          // Pin number (0-15)
@@ -101,6 +107,56 @@ namespace GPIO {
         volatile uint32_t AFRH;      // GPIO alternate function high register
     };
 
+    // EXTI register structure
+    struct EXTIRegisters {
+        volatile uint32_t IMR;    // Interrupt mask register
+        volatile uint32_t EMR;    // Event mask register
+        volatile uint32_t RTSR;   // Rising trigger selection register
+        volatile uint32_t FTSR;   // Falling trigger selection register
+        volatile uint32_t SWIER;  // Software interrupt event register
+        volatile uint32_t PR;     // Pending register
+    };
+    // SYSCFG register structure (needed for EXTI line selection)
+    struct SYSCFGRegisters {
+        volatile uint32_t MEMRMP;   // Memory remap register
+        volatile uint32_t PMC;      // Peripheral mode configuration register
+        volatile uint32_t EXTICR[4]; // External interrupt configuration registers
+        uint32_t RESERVED[2];       // Reserved
+        volatile uint32_t CMPCR;    // Compensation cell control register
+    };
+    // EXTI line definitions 
+    constexpr uint32_t EXTI_LINE0 = 0x00001;  // EXTI Line0 
+    constexpr uint32_t EXTI_LINE1 = 0x00002;  // EXTI Line1 
+    constexpr uint32_t EXTI_LINE2 = 0x00004;  // EXTI Line2
+    constexpr uint32_t EXTI_LINE3 = 0x00008;  // EXTI Line3
+    constexpr uint32_t EXTI_LINE4 = 0x00010;  // EXTI Line4
+    constexpr uint32_t EXTI_LINE5 = 0x00020;  // EXTI Line5
+    constexpr uint32_t EXTI_LINE6 = 0x00040;  // EXTI Line6
+    constexpr uint32_t EXTI_LINE7 = 0x00080;  // EXTI Line7
+    constexpr uint32_t EXTI_LINE8 = 0x00100;  // EXTI Line8
+    constexpr uint32_t EXTI_LINE9 = 0x00200;  // EXTI Line9
+    constexpr uint32_t EXTI_LINE10 = 0x00400; // EXTI Line10
+    constexpr uint32_t EXTI_LINE11 = 0x00800; // EXTI Line11
+    constexpr uint32_t EXTI_LINE12 = 0x01000; // EXTI Line12
+    constexpr uint32_t EXTI_LINE13 = 0x02000; // EXTI Line13
+    constexpr uint32_t EXTI_LINE14 = 0x04000; // EXTI Line14
+    constexpr uint32_t EXTI_LINE15 = 0x08000; // EXTI Line15
+    constexpr uint32_t EXTI_LINE16 = 0x10000; // EXTI Line16 - PVD Output
+    constexpr uint32_t EXTI_LINE17 = 0x20000; // EXTI Line17 - RTC Alarm
+    constexpr uint32_t EXTI_LINE18 = 0x40000; // EXTI Line18 - USB OTG FS Wakeup
+    constexpr uint32_t EXTI_LINE19 = 0x80000; // EXTI Line19 - Ethernet Wakeup
+    constexpr uint32_t EXTI_LINE20 = 0x100000; // EXTI Line20 - USB OTG HS Wakeup
+    constexpr uint32_t EXTI_LINE21 = 0x200000; // EXTI Line21 - RTC Tamper and Timestamp
+    constexpr uint32_t EXTI_LINE22 = 0x400000; // EXTI Line22 - RTC Wakeup
+    // Get EXTI register pointer
+    inline EXTIRegisters* getEXTI() {
+        return reinterpret_cast<EXTIRegisters*>(EXTI_BASE_ADDRESS);
+    }
+
+    // Get SYSCFG register pointer
+    inline SYSCFGRegisters* getSYSCFG() {
+        return reinterpret_cast<SYSCFGRegisters*>(SYSCFG_BASE_ADDRESS);
+    }
     // Get register structures for each GPIO port
     inline Registers* getPortA() {
         return reinterpret_cast<Registers*>(GPIOA_BASE);

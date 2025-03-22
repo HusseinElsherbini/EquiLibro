@@ -8,7 +8,7 @@ namespace Platform {
     namespace CMSIS {
         // CMSIS register definitions for STM32F4
 
-        
+        // SCB name space
         namespace SCB {
             // System Control Block register structure
             struct Registers {
@@ -163,9 +163,6 @@ namespace Platform {
                 }
             }
         }
-        
-        // SCB name space
-
         
         // SysTick name space
         namespace SysTick {

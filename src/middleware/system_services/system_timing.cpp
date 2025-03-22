@@ -80,7 +80,7 @@ Platform::Status SystemTiming::Init(void* config) {
     timer_config.mode = Platform::TIM::Mode::Basic;
     timer_config.direction = Platform::TIM::Direction::Up;
     timer_config.alignment = Platform::TIM::Alignment::Edge;
-    
+    timer_config.enableInterrupt = this->config.enable_interrupt;
     // Let the TimerInterface determine the appropriate prescaler for 1MHz timing
     // This is where we delegate the clock frequency determination to the timer interface
     timer_config.desiredFrequency = 1000000UL;  // 1MHz (1μs resolution)
@@ -267,6 +267,7 @@ Platform::Status SystemTiming::RegisterCallback(uint32_t event, void (*callback)
 // Update internal timestamp counter based on timer value
 void SystemTiming::UpdateTimestamp() {
     uint32_t current_count;
+
     precision_timer->GetCounterValue(current_count);
     
     // Calculate elapsed ticks, handling overflow
@@ -363,7 +364,11 @@ void SystemTiming::DelayMicroseconds(uint32_t us) {
 #endif
         // Direct hardware timer-based delay for maximum precision
         uint64_t start_time = GetMicroseconds();
-        while ((GetMicroseconds() - start_time) < us) {
+        uint64_t elapsed_time = GetMicroseconds() - start_time;
+
+        while (elapsed_time < us) {
+
+            elapsed_time = GetMicroseconds() - start_time;
             // This is a busy-wait loop
             __asm("nop");
         }

@@ -187,7 +187,7 @@ public:
 
     bool IsBusy() const { return transfer_state.in_progress; }
     I2CError GetLastError() const { return transfer_state.last_error; }
-    
+    bool IsInitialized(void);
 
     
     // Allow interrupt handlers to access private state

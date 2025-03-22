@@ -47,7 +47,7 @@ void ErrorManager::LogError(const ErrorInfo& error) {
     }
 }
 
-uint64_t GetTimestamp() {
+uint64_t ErrorManager::GetTimestamp() {
     // Get timestamp from system timing service
     return Middleware::SystemServices::SystemTiming::GetInstance().GetMilliseconds();
 }

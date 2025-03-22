@@ -2,6 +2,7 @@
 #include "hardware_abstraction/gpio.hpp"
 #include "hardware_abstraction/rcc.hpp"
 #include "common/platform.hpp"
+#include "common/platform_cmsis.hpp"
 #include <memory>
 #include <mutex>
 
@@ -265,5 +266,159 @@ Platform::Status GpioInterface::ReadPin(Platform::GPIO::Port port, uint8_t pin, 
 Platform::Status GpioInterface::ConfigurePin(const Platform::GPIO::GpioConfig& config) {
     return ConfigPin(config);
 }
+
+// Configure interrupt for a GPIO pin
+Platform::Status GpioInterface::ConfigureInterrupt(Port port, uint8_t pin, InterruptTrigger trigger) {
+    if (pin > 15) {
+        return Platform::Status::INVALID_PARAM;
+    }
+    
+    // Enable SYSCFG clock (needed for EXTI configuration)
+    Platform::RCC::RccInterface* rcc = &Platform::RCC::RccInterface::GetInstance();
+    rcc->EnablePeripheralClock(Platform::RCC::RccPeripheral::SYSCFG);
+    
+    // Select GPIO port for EXTI line
+    uint8_t port_index = static_cast<uint8_t>(port);
+    uint8_t exti_cr_index = pin / 4;
+    uint8_t exti_cr_position = (pin % 4) * 4;
+    
+    // Clear the EXTICR bits for this pin
+    Platform::GPIO::getSYSCFG()->EXTICR[exti_cr_index] &= ~(0xF << exti_cr_position);
+    // Set the port selection for this pin
+    Platform::GPIO::getSYSCFG()->EXTICR[exti_cr_index] |= (port_index << exti_cr_position);
+    
+    // Configure the trigger type
+    switch (trigger) {
+        case InterruptTrigger::Rising:
+            Platform::GPIO::getEXTI()->RTSR |= (1 << pin);  // Enable rising trigger
+            Platform::GPIO::getEXTI()->FTSR &= ~(1 << pin); // Disable falling trigger
+            break;
+        case InterruptTrigger::Falling:
+            Platform::GPIO::getEXTI()->RTSR &= ~(1 << pin); // Disable rising trigger
+            Platform::GPIO::getEXTI()->FTSR |= (1 << pin);  // Enable falling trigger
+            break;
+        case InterruptTrigger::Both:
+            Platform::GPIO::getEXTI()->RTSR |= (1 << pin);  // Enable rising trigger
+            Platform::GPIO::getEXTI()->FTSR |= (1 << pin);  // Enable falling trigger
+            break;
+        default:
+            return Platform::Status::INVALID_PARAM;
+    }
+    
+    return Platform::Status::OK;
 }
+
+// Enable or disable interrupt for a GPIO pin
+Platform::Status GpioInterface::EnableInterrupt(Port port, uint8_t pin, bool enable) {
+    if (pin > 15) {
+        return Platform::Status::INVALID_PARAM;
+    }
+    Platform::CMSIS::NVIC::IRQn irq;
+    
+    if (enable) {
+        // Enable EXTI line interrupt
+        Platform::GPIO::getEXTI()->IMR |= (1 << pin);
+        
+        if (pin <= 4) {
+            // Use a lookup table or switch statement for individual EXTI0-EXTI4 IRQs
+            switch (pin) {
+                case 0: irq = Platform::CMSIS::NVIC::IRQn::EXTI0; break;
+                case 1: irq = Platform::CMSIS::NVIC::IRQn::EXTI1; break;
+                case 2: irq = Platform::CMSIS::NVIC::IRQn::EXTI2; break;
+                case 3: irq = Platform::CMSIS::NVIC::IRQn::EXTI3; break;
+                case 4: irq = Platform::CMSIS::NVIC::IRQn::EXTI4; break;
+            }
+        } else if (pin <= 9) {
+            irq = Platform::CMSIS::NVIC::IRQn::EXTI9_5;
+        } else {
+            irq = Platform::CMSIS::NVIC::IRQn::EXTI15_10;
+        }
+        
+        Platform::CMSIS::NVIC::enableIRQ(irq);
+    } else {
+        // Disable EXTI line interrupt
+        Platform::GPIO::getEXTI()->IMR &= ~(1 << pin);
+        
+        // We don't disable the NVIC interrupt as other pins might be using it
+    }
+    
+    return Platform::Status::OK;
+}
+
+// Register callback for a GPIO pin interrupt
+Platform::Status GpioInterface::RegisterInterruptCallback(Port port, uint8_t pin, void (*callback)(void* param), void* param) {
+    if (pin > 15) {
+        return Platform::Status::INVALID_PARAM;
+    }
+    
+    // Store the callback
+    exti_callbacks[pin].callback = callback;
+    exti_callbacks[pin].param = param;
+    exti_callbacks[pin].enabled = (callback != nullptr);
+    
+    return Platform::Status::OK;
+}
+
+// Static handler for external interrupts
+void GpioInterface::HandleExternalInterrupt(uint32_t pin_mask) {
+    // Get instance
+    GpioInterface& gpio = GpioInterface::GetInstance();
+    
+    // Process each pin in the mask
+    for (uint8_t pin = 0; pin < 16; pin++) {
+        if (pin_mask & (1 << pin)) {
+            // Clear the pending flag first
+            Platform::GPIO::getEXTI()->PR = (1 << pin);
+            
+            // Call the registered callback if enabled
+            if (gpio.exti_callbacks[pin].enabled && gpio.exti_callbacks[pin].callback) {
+                gpio.exti_callbacks[pin].callback(gpio.exti_callbacks[pin].param);
+            }
+        }
+    }
+}
+}
+}
+
+extern "C" {
+    void EXTI0_IRQHandler(void) {
+        // Handle EXTI0 interrupt
+        Platform::GPIO::GpioInterface::HandleExternalInterrupt(Platform::GPIO::EXTI_LINE0);
+    }
+    
+    void EXTI1_IRQHandler(void) {
+        // Handle EXTI1 interrupt
+        Platform::GPIO::GpioInterface::HandleExternalInterrupt(Platform::GPIO::EXTI_LINE1);
+    }
+    
+    void EXTI2_IRQHandler(void) {
+        // Handle EXTI2 interrupt
+        Platform::GPIO::GpioInterface::HandleExternalInterrupt(Platform::GPIO::EXTI_LINE2);
+    }
+    
+    void EXTI3_IRQHandler(void) {
+        // Handle EXTI3 interrupt
+        Platform::GPIO::GpioInterface::HandleExternalInterrupt(Platform::GPIO::EXTI_LINE3);
+    }
+    
+    void EXTI4_IRQHandler(void) {
+        // Handle EXTI4 interrupt
+        Platform::GPIO::GpioInterface::HandleExternalInterrupt(Platform::GPIO::EXTI_LINE4);
+    }
+    
+    void EXTI9_5_IRQHandler(void) {
+        // Get pending interrupts for pins 5-9
+        uint16_t pending = Platform::GPIO::getEXTI()->PR & Platform::GPIO::getEXTI()->IMR & 0x03E0; // Mask for pins 5-9
+        
+        // Handle EXTI5-9 interrupts
+        Platform::GPIO::GpioInterface::HandleExternalInterrupt(pending);
+    }
+    
+    void EXTI15_10_IRQHandler(void) {
+        // Get pending interrupts for pins 10-15
+        uint16_t pending = Platform::GPIO::getEXTI()->PR & Platform::GPIO::getEXTI()->IMR & 0xFC00; // Mask for pins 10-15
+        
+        // Handle EXTI10-15 interrupts
+        Platform::GPIO::GpioInterface::HandleExternalInterrupt(pending);
+    }
 }

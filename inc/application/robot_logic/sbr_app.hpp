@@ -25,6 +25,15 @@ struct PIDConfig {
     float integral_limit; // Limit the integral term to prevent windup
 };
 
+// Define application events
+static constexpr uint32_t EVENT_BALANCE_UPDATE = 0x1;
+static constexpr uint32_t EVENT_FALL_DETECTED = 0x2;
+static constexpr uint32_t EVENT_IMU_ERROR = 0x3;
+static constexpr uint32_t EVENT_MOTOR_ERROR = 0x4;
+
+
+constexpr uint32_t M_PI = 3.14159265358979323846;
+
 // Configuration structure for self-balancing robot
 struct BalanceRobotConfig {
     // MPU6050 configuration
@@ -90,12 +99,7 @@ private:
         bool active;
     };
     
-    // Define application events
-    static constexpr uint32_t EVENT_BALANCE_UPDATE = 0x1;
-    static constexpr uint32_t EVENT_FALL_DETECTED = 0x2;
-    static constexpr uint32_t EVENT_IMU_ERROR = 0x3;
-    static constexpr uint32_t EVENT_MOTOR_ERROR = 0x4;
-    
+
     std::unordered_map<uint32_t, CallbackEntry> callbacks;
     
     // Private methods

@@ -41,22 +41,66 @@ PWMInterface& PWMInterface::GetInstance() {
     static PWMInterface instance;
     return instance;
 }
-
-// Initialize the PWM interface
 Platform::Status PWMInterface::Init(void* config_ptr) {
     // Check parameters
     if (!config_ptr) {
         return Platform::Status::INVALID_PARAM;
     }
+    Platform::Status status;
+    // Copy configuration
+    PWMConfig new_config = *static_cast<PWMConfig*>(config_ptr);
     
-    // If already initialized, deinitialize first
-    if (initialized) {
-        DeInit();
+    // Get the timer interface
+    timer_interface = &Platform::TIM::TimerInterface::GetInstance(new_config.timer_instance);
+    
+    // If this is the first initialization
+    if (!initialized) {
+        // Initialize with new config
+
+        status = InitPwm(new_config);
+        return status;
     }
     
-    // Copy configuration
-    config = *static_cast<PWMConfig*>(config_ptr);
+    // If already initialized with the same timer
+    if (config.timer_instance == new_config.timer_instance) {
+        // Check if new settings are compatible with existing ones
+        if (config.frequency != new_config.frequency || 
+            config.alignment != new_config.alignment ||
+            config.mode != new_config.mode) {
+            
+            // If settings are incompatible, check if any channels are active
+            bool any_active_channels = false;
+            for (bool active : channel_active) {
+                if (active) {
+                    any_active_channels = true;
+                    break;
+                }
+            }
+            
+            if (any_active_channels) {
+                // Cannot reconfigure with active channels
+                return Platform::Status::BUSY;
+            }
+            
+            // Safe to reconfigure - deinitialize first
+            DeInit();
+            
+            // ... (initialization code)
+            status = InitPwm(new_config);
+
+        }
+        
+        // If settings are compatible, just update internal config
+        // and continue using the existing timer configuration
+        return status;
+    }
     
+    // Trying to use a different timer instance
+    return Platform::Status::INVALID_PARAM;
+}
+// Initialize the PWM interface
+Platform::Status PWMInterface::InitPwm(PWMConfig &config) {
+
     // Validate and update configuration
     if (config.resolution_bits < 8 || config.resolution_bits > 16) {
         // Default to 10-bit resolution if invalid
@@ -116,10 +160,9 @@ Platform::Status PWMInterface::Init(void* config_ptr) {
         // TODO: Configure dead time insertion in BDTR register
         // This would be specific to advanced timers and requires additional implementation
     }
-    
-    // Mark as initialized
+
     initialized = true;
-    
+    this->config = config;
     return Platform::Status::OK;
 }
 

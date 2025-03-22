@@ -57,6 +57,7 @@ namespace MPU6050Reg {
 
 enum MPU6050Event {
     MPU6050_EVENT_DATA_READY = 0,    // New sensor data is available
+    MPU6050_EVENT_DATA_AVAILABLE,    // Data transfer complete
     MPU6050_EVENT_MOTION_DETECTED,   // Motion detection triggered
     MPU6050_EVENT_FIFO_OVERFLOW,     // FIFO buffer overflow
     MPU6050_EVENT_ERROR,             // Error occurred
@@ -85,10 +86,15 @@ constexpr uint32_t MPU6050_CTRL_DISABLE_TEMP_SENSOR = 0x2013;
 constexpr uint32_t MPU6050_CTRL_CALIBRATE_GYRO = 0x2014;
 constexpr uint32_t MPU6050_CTRL_CALIBRATE_ACCEL = 0x2015;
 
+typedef enum {
+    MPU6050_MODE_MANUAL,   // Application triggers readings explicitly
+    MPU6050_MODE_AUTO      // Driver automatically reads on data-ready interrupt
+} MPU6050_OperatingMode;
 /**
  * MPU6050 Configuration Structure
  */
 struct MPU6050Config {
+    Platform::I2C::I2CInterface *i2c_interface;
     uint8_t device_address;   // I2C device address (default is 0x68, or 0x69 if AD0 pin is high)
     uint8_t gyro_range;       // Gyroscope range (0=±250°/s, 1=±500°/s, 2=±1000°/s, 3=±2000°/s)
     uint8_t accel_range;      // Accelerometer range (0=±2g, 1=±4g, 2=±8g, 3=±16g)
@@ -100,7 +106,13 @@ struct MPU6050Config {
     bool enable_motion_detect; // Motion detection feature
     uint8_t motion_threshold; // Motion detection threshold (0-255)
     uint32_t i2c_timeout_ms;  // I2C operation timeout in milliseconds
+    MPU6050_OperatingMode operating_mode; // Data acquisition mode
+    bool enable_data_ready_interrupt;// Data ready interrupt configuration
+    Platform::GPIO::Port data_ready_port;
+    uint8_t data_ready_pin;
 };
+// In the MPU6050 configuration struct
+
 
 /**
  * MPU6050 Sensor Data Structure
@@ -204,21 +216,17 @@ private:
     Platform::Status ResetDevice();
     Platform::Status VerifyDeviceID();
     
-    static void TransferCompleteCallback(void* param) {
-        MPU6050* mpu = static_cast<MPU6050*>(param);
-        if (mpu) {
-            mpu->HandleTransferComplete();
-        }
-    }
-    void HandleTransferComplete();
-
+    // Operating mode and state tracking
+    MPU6050_OperatingMode current_mode;
+    bool data_ready_pending;    // Flag for manual mode to indicate data is ready
+ 
 public:
     /**
      * Constructor with I2C interface
      * 
      * @param i2c I2C interface
      */
-    explicit MPU6050();
+    MPU6050();
     
     /**
      * Destructor
@@ -285,6 +293,16 @@ public:
 
     Platform::Status RegisterCallback(uint32_t event, std::function<void()> callback) override;
 
+    bool IsDataReady();
+    
+    // Method to change operating mode at runtime
+    Platform::Status SetOperatingMode(MPU6050_OperatingMode mode);
+
+    static void DataReadyInterruptHandler(void* param);
+    void HandleDataReadyInterrupt();
+    static void I2CTransferCompleteHandler(void* param);
+    void HandleI2CTransferComplete();
+
     void TriggerCallback(MPU6050Event event);
     /**
      * Factory function for creating an MPU6050 driver instance
@@ -292,7 +310,7 @@ public:
      * @param i2c I2C interface
      * @return static reference to MPU6050 driver
      */
-    static MPU6050& CreateMPU6050(Platform::I2C::I2CInterface* i2c);
+    static MPU6050& CreateMPU6050(void);
 };
 
 } // namespace Sensors

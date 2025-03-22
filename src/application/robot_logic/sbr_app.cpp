@@ -2,10 +2,11 @@
 
 #include "robot_logic/sbr_app.hpp"
 #include "middleware/system_services/system_timing.hpp"
+#include "system_services/error.hpp"
 #include "hardware_abstraction/i2c.hpp"
 #include "hardware_abstraction/gpio.hpp"
 #include "middleware/system_services/error.hpp"
-#include <cmath>
+#include <math.h>
 
 namespace APP {
 
@@ -44,11 +45,8 @@ BalanceRobotApp::~BalanceRobotApp() {
 
 // Singleton accessor
 BalanceRobotApp& BalanceRobotApp::GetInstance() {
-
-    if (s_instance == nullptr) {
-        s_instance = new BalanceRobotApp();
-    }
-    return *s_instance;
+    static BalanceRobotApp instance;
+    return instance;
 }
 
 // Get current application state

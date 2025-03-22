@@ -52,6 +52,7 @@ Platform::Status TimerInterface::Init(void* config) {
     this->config = *timer_config;
     this->timer_instance = timer_config->timerInstance;
     
+    uint8_t val = static_cast<uint8_t>(this->timer_instance);
     // Enable the timer clock
     Platform::Status status = EnableClock();
     if (status != Platform::Status::OK) {
@@ -99,13 +100,12 @@ Platform::Status TimerInterface::Init(void* config) {
         // Calculate the prescaler to achieve the desired frequency
         timer_config->prescaler = (timer_clock / timer_config->desiredFrequency) - 1;
     }   
-    // Configure basic timer parameters
-    // Set prescaler
-    tim->PSC = timer_config->prescaler;
-    
+    // set prescaler
+    SetPrescaler(static_cast<uint32_t>(timer_config->prescaler));
+
     // Set period (auto-reload value)
-    tim->ARR = timer_config->period;
-    
+    SetPeriod(static_cast<uint32_t>(timer_config->period));
+
     // Configure clock division
     uint32_t cr1 = 0;
     cr1 |= (static_cast<uint32_t>(timer_config->clockDivision) & 0x3) << 8;  // CKD bits
@@ -141,6 +141,9 @@ Platform::Status TimerInterface::Init(void* config) {
     // Write configuration to CR1 register
     tim->CR1 = cr1;
     
+    if(timer_config->enableInterrupt){
+        EnableInterrupt(TimerEvent::Update);
+    }
     // Mark as initialized
     initialized = true;
     is_running = false;
@@ -218,7 +221,7 @@ Platform::Status TimerInterface::DeInit() {
 
 // Implementation for TimerInterface::GetTimerRegister
 Platform::TIM::Registers* TimerInterface::GetTimerRegister() const {
-    return Platform::TIM::getTimer(static_cast<uint8_t>(timer_instance));
+    return Platform::TIM::getTimer(static_cast<uint8_t>(this->timer_instance));
 }
 
 // Implementation for TimerInterface::EnableClock
@@ -301,10 +304,6 @@ Platform::TIM::TimerType Platform::TIM::TimerInterface::GetTimerType() const {
 }
 // Implementation for TimerInterface::SetPeriod
 Platform::Status TimerInterface::SetPeriod(uint32_t period) {
-    // Check if initialized
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
     
     // Get timer registers
     Platform::TIM::Registers* tim = GetTimerRegister();
@@ -333,11 +332,7 @@ Platform::Status TimerInterface::SetPeriod(uint32_t period) {
 
 // Implementation for TimerInterface::SetPrescaler
 Platform::Status TimerInterface::SetPrescaler(uint32_t prescaler) {
-    // Check if initialized
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
+
     // Get timer registers
     Platform::TIM::Registers* tim = GetTimerRegister();
     if (tim == nullptr) {
@@ -363,11 +358,6 @@ Platform::Status TimerInterface::SetPrescaler(uint32_t prescaler) {
 
 // Implementation for TimerInterface::ConfigureChannel
 Platform::Status TimerInterface::ConfigureChannel(const TimerChannelConfig& channelConfig) {
-    // Check if initialized
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
     // Validate channel number
     if (static_cast<uint8_t>(channelConfig.channel) > available_channels) {
         return Platform::Status::INVALID_PARAM;
@@ -615,11 +605,7 @@ Platform::Status TimerInterface::ConfigureChannel(Platform::TIM::Registers* tim,
 
 // Implementation for TimerInterface::EnableInterrupt
 Platform::Status TimerInterface::EnableInterrupt(TimerEvent event) {
-    // Check if initialized
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
+
     // Get timer registers
     Platform::TIM::Registers* tim = GetTimerRegister();
     if (tim == nullptr) {
@@ -629,6 +615,8 @@ Platform::Status TimerInterface::EnableInterrupt(TimerEvent event) {
     // Enable the appropriate interrupt in DIER register
     switch (event) {
         case TimerEvent::Update:
+            tim->DIER &= ~getBitValue(DIER::UIE);
+            tim->SR = 0;
             tim->DIER |= getBitValue(DIER::UIE);
             break;
         case TimerEvent::CC1:
@@ -692,6 +680,8 @@ Platform::Status TimerInterface::EnableInterrupt(TimerEvent event) {
             return Platform::Status::INVALID_PARAM;
     }
     
+    // clearn any pending update event flags 
+    tim->SR = 0; // Clear all status flags
     // Enable interrupt in NVIC
     Platform::CMSIS::NVIC::enableIRQ(irq);
     
@@ -700,11 +690,6 @@ Platform::Status TimerInterface::EnableInterrupt(TimerEvent event) {
 
 // Implementation for TimerInterface::DisableInterrupt
 Platform::Status TimerInterface::DisableInterrupt(TimerEvent event) {
-    // Check if initialized
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
     // Get timer registers
     Platform::TIM::Registers* tim = GetTimerRegister();
     if (tim == nullptr) {
@@ -779,11 +764,6 @@ Platform::Status TimerInterface::DisableInterrupt(TimerEvent event) {
 
 // Implementation for TimerInterface::RegisterCallback (from HwInterface)
 Platform::Status TimerInterface::RegisterCallback(uint32_t eventId, void (*callback)(void* param), void* param) {
-    // Check if initialized
-    if (!initialized) {
-        return Platform::Status::NOT_INITIALIZED;
-    }
-    
     // Validate event ID
     if (eventId >= static_cast<uint32_t>(TimerEvent::Count)) {
         return Platform::Status::INVALID_PARAM;
@@ -1123,7 +1103,7 @@ Platform::Status TimerInterface::Write(const void* data, uint16_t size, uint32_t
 
 // Explicit counter value access methods
 Platform::Status TimerInterface::GetCounterValue(uint32_t& value) {
-    if (!initialized) {
+    if (initialized == false) {
         return Platform::Status::NOT_INITIALIZED;
     }
     

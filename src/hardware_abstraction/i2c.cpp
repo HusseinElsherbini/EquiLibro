@@ -63,7 +63,9 @@ I2CInterface& I2CInterface::GetInstance(I2CInstance instance) {
     
     return instances[index];
 }
-
+bool I2CInterface::IsInitialized(void){
+    return initialized;
+}
 // Definition of copy constructor, declared private to prevent copying outside of the getInstance function
 I2CInterface::I2CInterface(const I2CInterface& other)
     : initialized(false), // Start uninitialized regardless of source

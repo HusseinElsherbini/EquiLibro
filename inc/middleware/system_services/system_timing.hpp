@@ -49,6 +49,7 @@ struct SystemTimingConfig {
     Platform::TIM::TimerInstance instance;
     bool use_rtos_timing;             // Whether to use RTOS timing when available
     bool enable_power_saving;         // Enable power saving features
+    bool enable_interrupt;
 };
 
 /**

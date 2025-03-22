@@ -27,10 +27,10 @@ namespace Sensors {
         if (!i2c_interface || !data) {
             return Platform::Status::ERROR;
         }
-        
+
         return i2c_interface->MemoryRead(config.device_address, reg_addr, 1, data, 1, timeout);
     }
-    
+
     /**
      * Write a single byte to MPU6050 register
      * 
@@ -43,7 +43,7 @@ namespace Sensors {
         if (!i2c_interface) {
             return Platform::Status::ERROR;
         }
-        
+
         return i2c_interface->MemoryWrite(config.device_address, reg_addr, 1, &data, 1, timeout);
     }
     
@@ -60,7 +60,7 @@ namespace Sensors {
         if (!i2c_interface || !data || len == 0) {
             return Platform::Status::ERROR;
         }
-        
+
         return i2c_interface->MemoryRead(config.device_address, reg_addr, 1, data, len, timeout);
     }
     
@@ -308,15 +308,19 @@ namespace Sensors {
      * @return Status code indicating success or failure
      */
     Platform::Status MPU6050::ResetDevice() {
+
+        Platform::GPIO::GpioInterface *test_gpio = &Platform::GPIO::GpioInterface::GetInstance();
         // Set reset bit in PWR_MGMT_1 register
         Platform::Status status = WriteRegister(MPU6050Reg::PWR_MGMT_1, 0x80);
         if (status != Platform::Status::OK) {
             return status;
         }
-        
+        //TODO: REMOVE TOGGLE 
+        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
         // Wait for reset to complete
         timing_service->DelayMilliseconds(100);
         
+        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
         // Clear reset bit and set clock source
         status = SetClockSource(config.clock_source);
         if (status != Platform::Status::OK) {
@@ -345,16 +349,6 @@ namespace Sensors {
         return Platform::Status::OK;
     }
     
-    void MPU6050::HandleTransferComplete() {
-        transfer_in_progress = false;
-        
-        // Process the data
-        ParseSensorData();
-        
-        // Trigger data ready callback
-        TriggerCallback(MPU6050_EVENT_DATA_READY);
-    }
-
     /**
      * Constructor with I2C interface
      * 
@@ -387,6 +381,8 @@ namespace Sensors {
         calibration.gyro_x_offset = 0;
         calibration.gyro_y_offset = 0;
         calibration.gyro_z_offset = 0;
+
+        timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
     }
     
     /**
@@ -404,15 +400,10 @@ namespace Sensors {
      * @param i2c Pointer to the I2C interface to use for communication
      * @return Reference to the newly created MPU6050 instance
      */
-    MPU6050& MPU6050::CreateMPU6050(Platform::I2C::I2CInterface* i2c) {
+    MPU6050& MPU6050::CreateMPU6050(void) {
         // Create a static instance to ensure it persists beyond function scope
         static Drivers::Sensors::MPU6050 mpu6050_instance;
-        
-        // Set the I2C interface for the MPU6050
-        mpu6050_instance.i2c_interface = i2c;
-        
-        mpu6050_instance.timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
-        
+
         return mpu6050_instance;
     }
     /**
@@ -423,19 +414,49 @@ namespace Sensors {
      */
     Platform::Status MPU6050::Init(void* config_ptr) {
 
-        Platform::Status status;
-
-        // Check if we have a valid I2C interface
-        if (!i2c_interface) {
-            state = DeviceState::Error;
-            return Platform::Status::ERROR;
-        }
-        
         // Copy configuration if provided
         if (config_ptr) {
             config = *static_cast<MPU6050Config*>(config_ptr);
         }
+
+        Platform::Status status;
+
+        this->i2c_interface = config.i2c_interface;
+        // Check if we have a valid I2C interface
+        if (!config.i2c_interface) {
+            state = DeviceState::Error;
+            return Platform::Status::ERROR;
+        }
         
+        // check if i2c interface is initialized 
+        if(!config.i2c_interface->IsInitialized()){
+            return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+        }
+        // Configure data ready interrupt if enabled
+        if (config.enable_data_ready_interrupt) {
+            // Configure GPIO pin for interrupt
+            Platform::GPIO::GpioInterface& gpio = Platform::GPIO::GpioInterface::GetInstance();
+            
+            // Configure the pin as input
+            Platform::GPIO::GpioConfig pin_config = {
+                .port = config.data_ready_port,
+                .pin = config.data_ready_pin,
+                .mode = Platform::GPIO::Mode::Input,
+                .pull = Platform::GPIO::Pull::PullDown, // Typically INT is active high
+            };
+            gpio.ConfigurePin(pin_config);
+            
+            // Configure and enable interrupt
+            gpio.ConfigureInterrupt(config.data_ready_port, config.data_ready_pin, 
+                                Platform::GPIO::InterruptTrigger::Rising);
+            
+            // Register callback
+            gpio.RegisterInterruptCallback(config.data_ready_port, config.data_ready_pin,
+                                        &DataReadyInterruptHandler, this);
+            
+            // Enable the interrupt
+            gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, true);
+        }
         // Reset device to ensure clean state
         status = ResetDevice();
         if (status != Platform::Status::OK) {
@@ -545,7 +566,7 @@ namespace Sensors {
         // Register I2C transfer complete callback
         i2c_interface->RegisterCallback(
             static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete),
-            TransferCompleteCallback,
+            I2CTransferCompleteHandler,
             this
         );
         
@@ -1183,6 +1204,61 @@ namespace Sensors {
     Platform::Status MPU6050::RegisterCallback(uint32_t event, std::function<void()> callback) {
         return Platform::Status::NOT_SUPPORTED;
     }
-    
+    // Add the static interrupt handler method
+    void MPU6050::DataReadyInterruptHandler(void* param) {
+        MPU6050* instance = static_cast<MPU6050*>(param);
+        if (instance) {
+            instance->HandleDataReadyInterrupt();
+        }
+    }
+
+    void MPU6050::HandleDataReadyInterrupt() {
+
+        // If a callback is registered for data-ready events, trigger it
+        TriggerCallback(MPU6050Event::MPU6050_EVENT_DATA_READY);
+        
+        // Start an I2C transaction if in auto mode
+        if (current_mode == MPU6050_MODE_AUTO) {
+            Platform::Status status = ReadRegisters(Drivers::Sensors::MPU6050Reg::ACCEL_XOUT_H, sensor_buffer.data(), sensor_buffer.size(), config.i2c_timeout_ms);
+            if(status == Platform::Status::BUSY){
+                //TODO:: add error checking mechanism 
+            }
+        }
+        else{
+            data_ready_pending = true;
+        }
+    }
+
+    void MPU6050::I2CTransferCompleteHandler(void* param){
+        MPU6050* instance = static_cast<MPU6050*>(param);
+        if (instance) {
+            instance->HandleI2CTransferComplete();
+        }
+    }
+    void MPU6050::HandleI2CTransferComplete() {
+        // Process the raw data
+        ParseSensorData();
+
+        // Notify application about data availability
+        TriggerCallback(MPU6050Event::MPU6050_EVENT_DATA_READY);
+
+    }
+
+    Platform::Status MPU6050::SetOperatingMode(MPU6050_OperatingMode mode) {
+        current_mode = mode;
+        return Platform::Status::OK;
+    }
+
+    bool MPU6050::IsDataReady() {
+        // If interrupts are disabled, check the MPU6050 status register directly
+        if (!config.enable_data_ready_interrupt) {
+            uint8_t status = 0;
+            Platform::Status result = ReadRegister(MPU6050Reg::INT_STATUS, &status);
+            return (result == Platform::Status::OK) && (status & 0x01);
+        }
+        
+        // Otherwise return the flag set by the interrupt handler
+        return data_ready_pending;
+    }
 }
 }

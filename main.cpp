@@ -14,12 +14,14 @@
 // Task handles for FreeRTOS tasks
 static TaskHandle_t s_balance_task_handle = nullptr;
 static TaskHandle_t s_monitor_task_handle = nullptr;
+static Platform::TIM::Registers* TIM5_REGS = Platform::TIM::getTimer(5);
+static Platform::GPIO::GpioInterface *test_gpio  = &Platform::GPIO::GpioInterface::GetInstance();
 
 // FreeRTOS task function for the balancing task
 void BalanceTaskFunction(void* params) {
     // Get the balance robot application instance
     // The singleton is already initialized, so we don't need to pass IMU again
-    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance(nullptr);
+    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
     
     // Run the balance control loop
     while (true) {
@@ -35,7 +37,7 @@ void BalanceTaskFunction(void* params) {
 void MonitorTaskFunction(void* params) {
     // Get the balance robot application instance
     // The singleton is already initialized, so we don't need to pass IMU again
-    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance(nullptr);
+    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
     
     // Get timing service for delays
     auto& timing = Middleware::SystemServices::SystemTiming::GetInstance();
@@ -85,12 +87,35 @@ Platform::Status SystemInit() {
     Middleware::SystemServices::SystemTimingConfig time_service_config = {
         .instance = Platform::TIM::TimerInstance::TIM5,
         .use_rtos_timing = true,
-        .enable_power_saving = false
+        .enable_power_saving = false,
+        .enable_interrupt = false, 
     };
     status = timing_service.Init(&time_service_config);
+
     if(status != Platform::Status::OK) {
         return status;
     }
+
+    Platform::GPIO::GpioConfig test_gpio_config = {
+        .port = Platform::GPIO::Port::PORTC,
+        .pin = 0,
+        .mode = Platform::GPIO::Mode::Output,
+        .outputType = Platform::GPIO::OutputType::PushPull,
+        .pull = Platform::GPIO::Pull::None
+    };
+
+    Platform::GPIO::GpioInterface *test_gpio  = &Platform::GPIO::GpioInterface::GetInstance();
+
+    status = test_gpio->ConfigurePin(test_gpio_config);
+    if(status != Platform::Status::OK) {
+        return status;
+    }
+    //TODO: DEBUG CODE, ERASE
+    return Platform::Status::OK;
+}
+
+// Initialize the self-balancing robot application
+Platform::Status InitBalanceRobotApp() {
 
     // Initialize I2C interface for IMU
     auto& i2c_interface = Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C1);
@@ -100,13 +125,14 @@ Platform::Status SystemInit() {
         .speed = Platform::I2C::Speed::Fast,       // 400kHz for MPU6050
         .addressing_mode = Platform::I2C::AddrMode::Addr7Bit,
         .own_address = 0x00,                      // Not used in master mode
-        .enable_dma = false,                      // Start without DMA for simplicity
+        .enable_dma = false,                      
         .enable_interrupts = true,
         .analog_filter = true,
         .digital_filter = 0,
         .stretch_clock = true
     };
-    status = i2c_interface.Init(&i2c_config);
+
+    Platform::Status status  = i2c_interface.Init(&i2c_config);
     if(status != Platform::Status::OK) {
         return status;
     }
@@ -127,42 +153,31 @@ Platform::Status SystemInit() {
         return status;
     }
 
-    return Platform::Status::OK;
-}
-
-// Initialize the self-balancing robot application
-Platform::Status InitBalanceRobotApp() {
-    // Get I2C interface for the IMU
-    auto& i2c_interface = Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C1);
-    
-    // Create and get MPU6050 instance using the factory method with I2C interface
-    Drivers::Sensors::MPU6050& imu = Drivers::Sensors::MPU6050::CreateMPU6050(&i2c_interface);
-    
     // Create and configure the self-balancing robot application
-    auto& balance_app = APP::BalanceRobotApp::GetInstance(&imu);
+    auto& balance_app = APP::BalanceRobotApp::GetInstance();
     
     // Configure the motors
     Drivers::Motor::VNH5019Config motor_left_config = {
         // PWM configuration for left motor
         .pwm_timer = Platform::TIM::TimerInstance::TIM1,
         .pwm_frequency = 20000,                      // 20kHz
-        .pwm_channel = Platform::PWM::PWMChannel::Channel1,
+        .pwm_channel = Platform::PWM::PWMChannel::Channel3,
         .pwm_port = Platform::GPIO::Port::PORTA,
-        .pwm_pin = 8,                                // PA8, matching the schematic
+        .pwm_pin = 10,                                // PA8, matching the schematic
         .pwm_af = Platform::GPIO::AlternateFunction::AF1,
         
         // Direction control pins
-        .ina_port = Platform::GPIO::Port::PORTB,
-        .ina_pin = 14,                               // PB14, matching the schematic
-        .inb_port = Platform::GPIO::Port::PORTB,
-        .inb_pin = 15,                               // PB15, matching the schematic
+        .ina_port = Platform::GPIO::Port::PORTC,
+        .ina_pin = 6,                               // PB14, matching the schematic
+        .inb_port = Platform::GPIO::Port::PORTC,
+        .inb_pin = 7,                               // PB15, matching the schematic
         
         // Enable pin - not needed for VNH5019 (tied to VCC)
         .use_enable_pin = false,
         
         // Current sensing (optional)
         .use_current_sensing = true,
-        .current_sense_channel = Platform::ADC::AdcChannel::Channel0,
+        .current_sense_channel = Platform::ADC::AdcChannel::Channel9,
         .current_sense_ratio = 0.14f,                // VNH5019 current sense is 0.14 V/A
         
         // No fault detection for simplicity
@@ -173,22 +188,46 @@ Platform::Status InitBalanceRobotApp() {
         .max_duty_cycle = 9000,                      // 90% max duty cycle for safety
         .acceleration_rate = 2000                     // Moderate acceleration
     };
-    
-    // Configure the right motor - similar to left but with different pins
-    Drivers::Motor::VNH5019Config motor_right_config = motor_left_config;
-    motor_right_config.pwm_channel = Platform::PWM::PWMChannel::Channel2;
-    motor_right_config.pwm_pin = 9;                   // PA9, a different timer channel
-    motor_right_config.ina_port = Platform::GPIO::Port::PORTB;
-    motor_right_config.ina_pin = 12;                  // PB12
-    motor_right_config.inb_port = Platform::GPIO::Port::PORTB;
-    motor_right_config.inb_pin = 13;                  // PB13
-    motor_right_config.current_sense_channel = Platform::ADC::AdcChannel::Channel1;
+
+    // Configure the motors
+    Drivers::Motor::VNH5019Config motor_right_config = {
+        // PWM configuration for left motor
+        .pwm_timer = Platform::TIM::TimerInstance::TIM1,
+        .pwm_frequency = 20000,                      // 20kHz
+        .pwm_channel = Platform::PWM::PWMChannel::Channel2,
+        .pwm_port = Platform::GPIO::Port::PORTA,
+        .pwm_pin = 9,                                // PA9, matching the schematic
+        .pwm_af = Platform::GPIO::AlternateFunction::AF1,
+        
+        // Direction control pins
+        .ina_port = Platform::GPIO::Port::PORTA,
+        .ina_pin = 8,                              
+        .inb_port = Platform::GPIO::Port::PORTB,
+        .inb_pin = 2,                              
+        
+        // Enable pin - not needed for VNH5019 (tied to VCC)
+        .use_enable_pin = false,
+        
+        // Current sensing (optional)
+        .use_current_sensing = true,
+        .current_sense_channel = Platform::ADC::AdcChannel::Channel4,
+        .current_sense_ratio = 0.14f,                // VNH5019 current sense is 0.14 V/A
+        
+        // No fault detection for simplicity
+        .use_diag_pin = false,
+        
+        // Speed control parameters
+        .min_duty_cycle = 0,
+        .max_duty_cycle = 9000,                      // 90% max duty cycle for safety
+        .acceleration_rate = 2000                     // Moderate acceleration
+    }; 
     
     // Configure the IMU (MPU6050)
-    Drivers::Sensors::MPU6050Config imu_config = {
+    Drivers::Sensors::MPU6050Config imu_config = { 
+        .i2c_interface = &i2c_interface,
         .device_address = 0x68,                      // Default address when AD0 is GND
-        .gyro_range = 1,                             // ±500 deg/s - suitable for balancing
-        .accel_range = 1,                            // ±4g - suitable for balancing
+        .gyro_range = 0,                             // ±250 deg/s - suitable for balancing
+        .accel_range = 0,                            // ±4g - suitable for balancing
         .dlpf_mode = 3,                              // 44Hz bandwidth - good balance of response and noise
         .sample_rate_div = 4,                        // 200Hz sample rate (1kHz / (1 + 4))
         .interrupt_enabled = true,                   // Use data ready interrupt for efficiency
@@ -216,11 +255,11 @@ Platform::Status InitBalanceRobotApp() {
         .motor_right_config = motor_right_config,
         .pid_config = pid_config,
         .control_loop_interval_ms = 5,               // 200Hz control loop
-        .enable_debug_output = true
+        .enable_debug_output = false
     };
     
     // Initialize the balance robot application
-    Platform::Status status = balance_app.Init(&balance_config);
+    status = balance_app.Init(&balance_config);
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -232,7 +271,7 @@ Platform::Status InitBalanceRobotApp() {
 void FallDetectedCallback(void* param) {
     // Get the balance app
     // The singleton is already initialized, so we don't need to pass IMU again
-    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance(nullptr);
+    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
     
     // Stop the robot immediately
     balance_app.Stop();
@@ -249,7 +288,6 @@ int main() {
             // If system init fails, we can't proceed
         }
     }
-    
     // Initialize the self-balancing robot application
     status = InitBalanceRobotApp();
     if (status != Platform::Status::OK) {
@@ -261,10 +299,10 @@ int main() {
     
     // Get the balance robot application instance
     // The singleton is already initialized in InitBalanceRobotApp
-    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance(nullptr);
+    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
     
     // Register fall detection callback
-    balance_app.RegisterCallback(APP::BalanceRobotApp::EVENT_FALL_DETECTED, FallDetectedCallback, nullptr);
+    balance_app.RegisterCallback(APP::EVENT_FALL_DETECTED, FallDetectedCallback, nullptr);
     
     // Create FreeRTOS tasks
     // Balance task - higher priority as it needs to run at consistent intervals
@@ -310,4 +348,15 @@ int main() {
     }
     
     return 0;
+}
+
+extern "C" void TIM5_IRQHandler(void) {
+    // Check if update interrupt flag is set
+    if (TIM5_REGS->SR & static_cast<uint32_t>(Platform::TIM::SR::UIF)) {
+        // Clear the interrupt flag
+        TIM5_REGS->SR &= ~static_cast<uint32_t>(Platform::TIM::SR::UIF);
+        
+        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
+
+    }
 }

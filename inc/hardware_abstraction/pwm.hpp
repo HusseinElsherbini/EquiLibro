@@ -343,6 +343,7 @@ public:
      */
     uint32_t GetDutyCycle(PWMChannel channel) const;
     
+    Platform::Status InitPwm(PWMConfig& config_ptr);
     /**
      * Check if a specific channel is active
      * 

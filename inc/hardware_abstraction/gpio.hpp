@@ -15,7 +15,15 @@ class GpioInterface : public HwInterface {
 private:
     // Internal state tracking
     bool initialized;
-    
+        // Callback registration
+    struct InterruptCallbackInfo {
+        void (*callback)(void* param);
+        void* param;
+        bool enabled;
+    };
+        
+    // Array of callbacks for EXTI lines (pins 0-15)
+    InterruptCallbackInfo exti_callbacks[16];
     // Helper methods
     Platform::Status ConfigPin(const Platform::GPIO::GpioConfig& config);
     Platform::GPIO::Registers* GetPortAddress(Platform::GPIO::Port port);
@@ -42,6 +50,12 @@ public:
     Platform::Status ReadPin(Platform::GPIO::Port port, uint8_t pin, Platform::GPIO::GpioPinState& state);
     Platform::Status ConfigurePin(const Platform::GPIO::GpioConfig& config);
     
+    Platform::Status EnableInterrupt(Port port, uint8_t pin, bool enable);
+    Platform::Status ConfigureInterrupt(Port port, uint8_t pin, InterruptTrigger trigger);
+    Platform::Status RegisterInterruptCallback(Port port, uint8_t pin, void (*callback)(void* param), void* param);
+    
+    // Static method for IRQ handlers to call
+    static void HandleExternalInterrupt(uint32_t pin_mask);
     // Singleton pattern for GPIO interface (only need one instance)
     static GpioInterface& GetInstance();
 };
