@@ -94,7 +94,7 @@ typedef enum {
  * MPU6050 Configuration Structure
  */
 struct MPU6050Config {
-    Platform::I2C::I2CInterface *i2c_interface;
+    Platform::I2C::I2CInstance i2c_instance;
     uint8_t device_address;   // I2C device address (default is 0x68, or 0x69 if AD0 pin is high)
     uint8_t gyro_range;       // Gyroscope range (0=±250°/s, 1=±500°/s, 2=±1000°/s, 3=±2000°/s)
     uint8_t accel_range;      // Accelerometer range (0=±2g, 1=±4g, 2=±8g, 3=±16g)

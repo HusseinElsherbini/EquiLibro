@@ -117,8 +117,7 @@ Platform::Status SystemInit() {
 // Initialize the self-balancing robot application
 Platform::Status InitBalanceRobotApp() {
 
-    // Initialize I2C interface for IMU
-    auto& i2c_interface = Platform::I2C::I2CInterface::GetInstance(Platform::I2C::I2CInstance::I2C1);
+    // Configure I2C interface for IMU
     Platform::I2C::I2CConfig i2c_config = {
         .i2c_instance = Platform::I2C::I2CInstance::I2C1,
         .mode = Platform::I2C::Mode::Master,
@@ -131,46 +130,32 @@ Platform::Status InitBalanceRobotApp() {
         .digital_filter = 0,
         .stretch_clock = true
     };
-
-    Platform::Status status  = i2c_interface.Init(&i2c_config);
-    if(status != Platform::Status::OK) {
-        return status;
-    }
-
-    // Initialize PWM interfaces for motors
-    auto& pwm_interface = Platform::PWM::PWMInterface::GetInstance();
-    Platform::PWM::PWMConfig pwm_config = {
-        .timer_instance = Platform::TIM::TimerInstance::TIM1,
-        .frequency = 20000,                       // 20kHz PWM frequency
-        .resolution_bits = 10,                    // 10-bit resolution (0-1023)
-        .alignment = Platform::PWM::PWMAlignment::EdgeAligned,
-        .mode = Platform::PWM::PWMMode::Standard,
-        .use_dead_time = false,
-        .dead_time_ns = 0
-    };
-    status = pwm_interface.Init(&pwm_config);
-    if(status != Platform::Status::OK) {
-        return status;
-    }
-
-    // Create and configure the self-balancing robot application
-    auto& balance_app = APP::BalanceRobotApp::GetInstance();
     
     // Configure the motors
     Drivers::Motor::VNH5019Config motor_left_config = {
         // PWM configuration for left motor
-        .pwm_timer = Platform::TIM::TimerInstance::TIM1,
-        .pwm_frequency = 20000,                      // 20kHz
-        .pwm_channel = Platform::PWM::PWMChannel::Channel3,
-        .pwm_port = Platform::GPIO::Port::PORTA,
-        .pwm_pin = 10,                                // PA8, matching the schematic
-        .pwm_af = Platform::GPIO::AlternateFunction::AF1,
-        
+        .pwm_config = {
+            .timer_instance = Platform::TIM::TimerInstance::TIM1,
+            .frequency = 20000,                       // 20kHz PWM frequency
+            .resolution_bits = 10,                    // 10-bit resolution (0-1023)
+            .alignment = Platform::PWM::PWMAlignment::EdgeAligned,
+            .mode = Platform::PWM::PWMMode::Standard,
+            .use_dead_time = false,
+            .dead_time_ns = 0
+        },
+
+        .pwm_ch_config = {
+            .channel = Platform::PWM::PWMChannel::Channel3,
+            .gpio_port = Platform::GPIO::Port::PORTA,
+            .gpio_pin = 10,                                
+            .gpio_af = Platform::GPIO::AlternateFunction::AF1,
+        },
+
         // Direction control pins
         .ina_port = Platform::GPIO::Port::PORTC,
-        .ina_pin = 6,                               // PB14, matching the schematic
+        .ina_pin = 6,                               
         .inb_port = Platform::GPIO::Port::PORTC,
-        .inb_pin = 7,                               // PB15, matching the schematic
+        .inb_pin = 7,                               
         
         // Enable pin - not needed for VNH5019 (tied to VCC)
         .use_enable_pin = false,
@@ -192,12 +177,22 @@ Platform::Status InitBalanceRobotApp() {
     // Configure the motors
     Drivers::Motor::VNH5019Config motor_right_config = {
         // PWM configuration for left motor
-        .pwm_timer = Platform::TIM::TimerInstance::TIM1,
-        .pwm_frequency = 20000,                      // 20kHz
-        .pwm_channel = Platform::PWM::PWMChannel::Channel2,
-        .pwm_port = Platform::GPIO::Port::PORTA,
-        .pwm_pin = 9,                                // PA9, matching the schematic
-        .pwm_af = Platform::GPIO::AlternateFunction::AF1,
+
+        .pwm_config = {
+            .timer_instance = Platform::TIM::TimerInstance::TIM1,
+            .frequency = 20000,                       // 20kHz PWM frequency
+            .resolution_bits = 10,                    // 10-bit resolution (0-1023)
+            .alignment = Platform::PWM::PWMAlignment::EdgeAligned,
+            .mode = Platform::PWM::PWMMode::Standard,
+            .use_dead_time = false,
+            .dead_time_ns = 0
+        },
+        .pwm_ch_config = {
+            .channel = Platform::PWM::PWMChannel::Channel2,
+            .gpio_port = Platform::GPIO::Port::PORTA,
+            .gpio_pin = 9,                                
+            .gpio_af = Platform::GPIO::AlternateFunction::AF1,
+        },
         
         // Direction control pins
         .ina_port = Platform::GPIO::Port::PORTA,
@@ -224,7 +219,7 @@ Platform::Status InitBalanceRobotApp() {
     
     // Configure the IMU (MPU6050)
     Drivers::Sensors::MPU6050Config imu_config = { 
-        .i2c_interface = &i2c_interface,
+        .i2c_instance = Platform::I2C::I2CInstance::I2C1, // I2c Instance to use
         .device_address = 0x68,                      // Default address when AD0 is GND
         .gyro_range = 0,                             // ±250 deg/s - suitable for balancing
         .accel_range = 0,                            // ±4g - suitable for balancing
@@ -235,7 +230,10 @@ Platform::Status InitBalanceRobotApp() {
         .use_fifo = false,                           // No FIFO for simplicity
         .enable_motion_detect = false,               // No motion detection
         .motion_threshold = 0,
-        .i2c_timeout_ms = 10                         // 10ms timeout for I2C operations
+        .i2c_timeout_ms = 10,                        // 10ms timeout for I2C operations
+        .enable_data_ready_interrupt = true,
+        .data_ready_port = Platform::GPIO::Port::PORTB,
+        .data_ready_pin = 8,
     };
     
     // Configure the PID controller
@@ -258,8 +256,10 @@ Platform::Status InitBalanceRobotApp() {
         .enable_debug_output = false
     };
     
+    // Create and configure the self-balancing robot application
+    auto& balance_app = APP::BalanceRobotApp::GetInstance();
     // Initialize the balance robot application
-    status = balance_app.Init(&balance_config);
+    Platform::Status status = balance_app.Init(&balance_config);
     if (status != Platform::Status::OK) {
         return status;
     }

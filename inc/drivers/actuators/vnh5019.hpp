@@ -18,14 +18,11 @@ enum class Direction {
 
 // VNH5019 Motor Driver configuration
 struct VNH5019Config {
-    // PWM configuration
-    Platform::TIM::TimerInstance pwm_timer;       // Timer to use for PWM
-    uint32_t pwm_frequency;                       // PWM frequency in Hz
-    Platform::PWM::PWMChannel pwm_channel;        // PWM channel
-    Platform::GPIO::Port pwm_port;                // GPIO port for PWM pin
-    uint8_t pwm_pin;                              // GPIO pin for PWM
-    Platform::GPIO::AlternateFunction pwm_af;     // Alternate function for PWM
     
+    // PWM configuration
+    Platform::PWM::PWMConfig pwm_config;   
+    Platform::PWM::PWMChannelConfig pwm_ch_config;   
+   
     // Direction control pins
     Platform::GPIO::Port ina_port;                // GPIO port for INA pin
     uint8_t ina_pin;                              // GPIO pin for INA

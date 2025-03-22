@@ -35,40 +35,14 @@ Platform::Status VNH5019Driver::Init(const VNH5019Config* config_ptr) {
     if (config.use_current_sensing) {
         adc_interface = &Platform::ADC::AdcInterface::GetInstance();
     }
+
     
-    // Initialize PWM
-    Platform::PWM::PWMConfig pwm_config = {
-        .timer_instance = config.pwm_timer,
-        .frequency = config.pwm_frequency,
-        .resolution_bits = 10,                                // 10-bit resolution (0-1023)
-        .alignment = Platform::PWM::PWMAlignment::EdgeAligned,
-        .mode = Platform::PWM::PWMMode::Standard,
-        .use_dead_time = false,
-        .dead_time_ns = 0
-    };
-    
-    Platform::Status status = pwm_interface->Init(&pwm_config);
+    Platform::Status status = pwm_interface->ConfigureChannel(config.pwm_ch_config);
     if (status != Platform::Status::OK) {
         return status;
     }
     
-    // Configure PWM channel
-    Platform::PWM::PWMChannelConfig pwm_channel_config = {
-        .channel = config.pwm_channel,
-        .duty_cycle = 0,                                     // Start with 0% duty cycle
-        .polarity = Platform::PWM::PWMPolarity::ActiveHigh,
-        .complementary_output = false,
-        .gpio_port = config.pwm_port,
-        .gpio_pin = config.pwm_pin,
-        .gpio_af = config.pwm_af
-    };
-    
-    status = pwm_interface->ConfigureChannel(pwm_channel_config);
-    if (status != Platform::Status::OK) {
-        return status;
-    }
-    
-    status = pwm_interface->EnableChannel(config.pwm_channel);
+    status = pwm_interface->EnableChannel(config.pwm_ch_config.channel);
     if (status != Platform::Status::OK) {
         return status;
     }
@@ -178,7 +152,7 @@ Platform::Status VNH5019Driver::Disable() {
     SetDirectionPins(Direction::Coast);
     
     // Set PWM duty cycle to 0
-    pwm_interface->SetDutyCycle(config.pwm_channel, 0);
+    pwm_interface->SetDutyCycle(config.pwm_ch_config.channel, 0);
     
     if (config.use_enable_pin) {
         gpio_interface->ResetPin(config.enable_port, config.enable_pin);
@@ -253,7 +227,7 @@ Platform::Status VNH5019Driver::SetSpeed(int32_t speed) {
                                         std::min(target_speed, config.max_duty_cycle));
         
         // Set PWM duty cycle
-        pwm_interface->SetDutyCycle(config.pwm_channel, limited_speed);
+        pwm_interface->SetDutyCycle(config.pwm_ch_config.channel, limited_speed);
     }
     
     return Platform::Status::OK;
@@ -285,9 +259,9 @@ Platform::Status VNH5019Driver::SetSpeedAndDirection(uint32_t speed, Direction d
         
         // Only apply PWM if not in coast mode
         if (direction != Direction::Coast) {
-            pwm_interface->SetDutyCycle(config.pwm_channel, limited_speed);
+            pwm_interface->SetDutyCycle(config.pwm_ch_config.channel, limited_speed);
         } else {
-            pwm_interface->SetDutyCycle(config.pwm_channel, 0);
+            pwm_interface->SetDutyCycle(config.pwm_ch_config.channel, 0);
         }
     }
     
@@ -305,7 +279,7 @@ Platform::Status VNH5019Driver::Stop(bool brake) {
     // If immediate stop requested
     if (config.acceleration_rate == 0) {
         current_speed = 0;
-        pwm_interface->SetDutyCycle(config.pwm_channel, 0);
+        pwm_interface->SetDutyCycle(config.pwm_ch_config.channel, 0);
     }
     
     // Set direction pins according to brake mode
@@ -388,7 +362,7 @@ void VNH5019Driver::Process() {
         // If fault detected, put motor in safe state
         if (fault_detected) {
             SetDirectionPins(Direction::Coast);
-            pwm_interface->SetDutyCycle(config.pwm_channel, 0);
+            pwm_interface->SetDutyCycle(config.pwm_ch_config.channel, 0);
             current_speed = 0;
             
             // You could also trigger an event/callback here to notify the application
@@ -427,7 +401,7 @@ void VNH5019Driver::Process() {
             
             // Only apply PWM if not in coast mode
             if (current_direction != Direction::Coast) {
-                pwm_interface->SetDutyCycle(config.pwm_channel, limited_speed);
+                pwm_interface->SetDutyCycle(config.pwm_ch_config.channel, limited_speed);
             }
             
             last_update_time = current_time;

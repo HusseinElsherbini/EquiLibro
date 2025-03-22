@@ -65,6 +65,7 @@ Platform::Status BalanceRobotApp::Init(void* config_ptr) {
         config = *static_cast<BalanceRobotConfig*>(config_ptr);
     } else {
         // Default configuration
+        config.imu_config.i2c_instance = Platform::I2C::I2CInstance::I2C1;
         config.imu_config.device_address = 0x68; // Default MPU6050 address
         config.imu_config.gyro_range = 1;        // ±500°/s
         config.imu_config.accel_range = 1;       // ±4g
@@ -90,10 +91,24 @@ Platform::Status BalanceRobotApp::Init(void* config_ptr) {
         return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
     }
     
-    // Initialize IMU (MPU6050)
+    // Initialize I2c Interface
+    Platform::I2C::I2CInterface *i2c_interface = &Platform::I2C::I2CInterface::GetInstance(config.imu_config.i2c_instance);
+    Platform::Status status = i2c_interface->Init(&config.imu_config);
+    if (status != Platform::Status::OK) {
+        // Log error and return
+        Middleware::SystemServices::ERROR::ERROR_LOG(
+            Middleware::SystemServices::ERROR::MODULE_APPLICATION_MAIN,
+            Middleware::SystemServices::ERROR::ERR_INITIALIZATION,
+            status
+        );
+        current_state = AppState::Error;
+        return status;
+    }
+
+    // Initialize IMU (MPU6050) Driver
     imu = &Drivers::Sensors::MPU6050::CreateMPU6050();
     
-    Platform::Status status = imu->Init(&config.imu_config);
+    status = imu->Init(&config.imu_config);
     if (status != Platform::Status::OK) {
         // Log error and return
         Middleware::SystemServices::ERROR::ERROR_LOG(
@@ -107,7 +122,20 @@ Platform::Status BalanceRobotApp::Init(void* config_ptr) {
     
     // Register IMU data ready callback
     imu->RegisterCallback(Drivers::Sensors::MPU6050_EVENT_DATA_READY, IMUDataReadyCallback, this);
-    
+
+    // Initialize PWM Interface
+    Platform::PWM::PWMInterface *pwm_interface = &Platform::PWM::PWMInterface::GetInstance();
+    status = pwm_interface->Init(&config.motor_left_config.pwm_config);
+    if (status != Platform::Status::OK) {
+        // Log error and return
+        Middleware::SystemServices::ERROR::ERROR_LOG(
+            Middleware::SystemServices::ERROR::MODULE_APPLICATION_MAIN,
+            Middleware::SystemServices::ERROR::ERR_INITIALIZATION,
+            status
+        );
+        current_state = AppState::Error;
+        return status;
+    }
     // Initialize motor drivers
     motor_left = new Drivers::Motor::VNH5019Driver();
     status = motor_left->Init(&config.motor_left_config);

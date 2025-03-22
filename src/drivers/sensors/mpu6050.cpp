@@ -420,16 +420,15 @@ namespace Sensors {
         }
 
         Platform::Status status;
-
-        this->i2c_interface = config.i2c_interface;
+        this->i2c_interface = &Platform::I2C::I2CInterface::GetInstance(config.i2c_instance);
         // Check if we have a valid I2C interface
-        if (!config.i2c_interface) {
+        if (!this->i2c_interface) {
             state = DeviceState::Error;
             return Platform::Status::ERROR;
         }
         
         // check if i2c interface is initialized 
-        if(!config.i2c_interface->IsInitialized()){
+        if(!this->i2c_interface->IsInitialized()){
             return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
         }
         // Configure data ready interrupt if enabled
