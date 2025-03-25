@@ -409,7 +409,11 @@ extern "C" {
     void EXTI9_5_IRQHandler(void) {
         // Get pending interrupts for pins 5-9
         uint16_t pending = Platform::GPIO::getEXTI()->PR & Platform::GPIO::getEXTI()->IMR & 0x03E0; // Mask for pins 5-9
-        
+
+        //TODO: REMOVE TOGGLE 
+        Platform::GPIO::GpioInterface *test_gpio = &Platform::GPIO::GpioInterface::GetInstance();
+
+        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
         // Handle EXTI5-9 interrupts
         Platform::GPIO::GpioInterface::HandleExternalInterrupt(pending);
     }

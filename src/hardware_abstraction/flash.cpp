@@ -333,7 +333,7 @@ Platform::Status FlashInterfaceImpl::ReadData(uint32_t address, void* data, uint
     }
     
     // Validate address range
-    if (address < 0x08000000 || address + size > 0x08080000) {
+    if (address < 0x08000000 || address + size > GetFlashEndAddress()) {
         return Platform::Status::INVALID_PARAM;
     }
     
@@ -705,7 +705,7 @@ Platform::Status FlashInterfaceImpl::Unlock() {
  // Find which sector contains a given address
  uint8_t FlashInterfaceImpl::FindSectorNumber(uint32_t address) const {
     // Check if address is in flash range
-    if (address < Platform::FLASH::FLASH_BASE_ADDRESS || address >= Platform::FLASH::FLASH_END_ADDRESS) {
+    if (address < Platform::FLASH::FLASH_BASE_ADDRESS || address >= GetFlashEndAddress()) {
         return Platform::FLASH::INVALID_SECTOR; // Invalid sector
     }
     

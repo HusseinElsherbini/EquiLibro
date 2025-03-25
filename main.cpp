@@ -10,57 +10,9 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include <memory>
+#include "sbr_app_tasks.hpp"
+#include "storage_manager.hpp"
 
-// Task handles for FreeRTOS tasks
-static TaskHandle_t s_balance_task_handle = nullptr;
-static TaskHandle_t s_monitor_task_handle = nullptr;
-static Platform::TIM::Registers* TIM5_REGS = Platform::TIM::getTimer(5);
-static Platform::GPIO::GpioInterface *test_gpio  = &Platform::GPIO::GpioInterface::GetInstance();
-
-// FreeRTOS task function for the balancing task
-void BalanceTaskFunction(void* params) {
-    // Get the balance robot application instance
-    // The singleton is already initialized, so we don't need to pass IMU again
-    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
-    
-    // Run the balance control loop
-    while (true) {
-        // Process the balance application
-        balance_app.Process(nullptr);
-        
-        // Short delay to yield to other tasks
-        vTaskDelay(1);
-    }
-}
-
-// FreeRTOS task function for the monitoring task
-void MonitorTaskFunction(void* params) {
-    // Get the balance robot application instance
-    // The singleton is already initialized, so we don't need to pass IMU again
-    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
-    
-    // Get timing service for delays
-    auto& timing = Middleware::SystemServices::SystemTiming::GetInstance();
-    
-    while (true) {
-        // Check application state
-        APP::AppState state = balance_app.GetState();
-        
-        // If the application is in error state, try to restart
-        if (state == APP::AppState::Error) {
-            // Try to re-initialize
-            balance_app.Init(nullptr);
-        }
-        
-        // If the application is idle, try to start balancing
-        if (state == APP::AppState::Idle) {
-            balance_app.Start();
-        }
-        
-        // Delay for monitoring interval (100ms)
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
 
 // System initialization function
 Platform::Status SystemInit() {
@@ -96,6 +48,15 @@ Platform::Status SystemInit() {
         return status;
     }
 
+    // initialize storage manager
+    Middleware::Storage::StorageManager& storage = Middleware::Storage::StorageManager::GetInstance();
+
+    status = storage.Init();
+
+    if(status != Platform::Status::OK) {
+        return status;
+    }
+
     Platform::GPIO::GpioConfig test_gpio_config = {
         .port = Platform::GPIO::Port::PORTC,
         .pin = 0,
@@ -116,20 +77,6 @@ Platform::Status SystemInit() {
 
 // Initialize the self-balancing robot application
 Platform::Status InitBalanceRobotApp() {
-
-    // Configure I2C interface for IMU
-    Platform::I2C::I2CConfig i2c_config = {
-        .i2c_instance = Platform::I2C::I2CInstance::I2C1,
-        .mode = Platform::I2C::Mode::Master,
-        .speed = Platform::I2C::Speed::Fast,       // 400kHz for MPU6050
-        .addressing_mode = Platform::I2C::AddrMode::Addr7Bit,
-        .own_address = 0x00,                      // Not used in master mode
-        .enable_dma = false,                      
-        .enable_interrupts = true,
-        .analog_filter = true,
-        .digital_filter = 0,
-        .stretch_clock = true
-    };
     
     // Configure the motors
     Drivers::Motor::VNH5019Config motor_left_config = {
@@ -219,7 +166,19 @@ Platform::Status InitBalanceRobotApp() {
     
     // Configure the IMU (MPU6050)
     Drivers::Sensors::MPU6050Config imu_config = { 
-        .i2c_instance = Platform::I2C::I2CInstance::I2C1, // I2c Instance to use
+
+        .i2c_config = {
+            .i2c_instance = Platform::I2C::I2CInstance::I2C1,
+            .mode = Platform::I2C::Mode::Master,
+            .speed = Platform::I2C::Speed::Fast,       // 400kHz for MPU6050
+            .addressing_mode = Platform::I2C::AddrMode::Addr7Bit,
+            .own_address = 0x00,                      // Not used in master mode
+            .enable_dma = false,                      
+            .enable_interrupts = true,
+            .analog_filter = true,
+            .digital_filter = 0,
+            .stretch_clock = true
+        },
         .device_address = 0x68,                      // Default address when AD0 is GND
         .gyro_range = 0,                             // ±250 deg/s - suitable for balancing
         .accel_range = 0,                            // ±4g - suitable for balancing
@@ -231,9 +190,11 @@ Platform::Status InitBalanceRobotApp() {
         .enable_motion_detect = false,               // No motion detection
         .motion_threshold = 0,
         .i2c_timeout_ms = 10,                        // 10ms timeout for I2C operations
+        .operating_mode = Drivers::Sensors::MPU6050_OperatingMode::MPU6050_MODE_AUTO,
         .enable_data_ready_interrupt = true,
         .data_ready_port = Platform::GPIO::Port::PORTB,
         .data_ready_pin = 8,
+        
     };
     
     // Configure the PID controller
@@ -252,8 +213,6 @@ Platform::Status InitBalanceRobotApp() {
         .motor_left_config = motor_left_config,
         .motor_right_config = motor_right_config,
         .pid_config = pid_config,
-        .control_loop_interval_ms = 5,               // 200Hz control loop
-        .enable_debug_output = false
     };
     
     // Create and configure the self-balancing robot application
@@ -265,18 +224,6 @@ Platform::Status InitBalanceRobotApp() {
     }
     
     return Platform::Status::OK;
-}
-
-// Fall detection callback
-void FallDetectedCallback(void* param) {
-    // Get the balance app
-    // The singleton is already initialized, so we don't need to pass IMU again
-    APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
-    
-    // Stop the robot immediately
-    balance_app.Stop();
-    
-    // Could add additional safety measures here if needed
 }
 
 int main() {
@@ -297,60 +244,40 @@ int main() {
         }
     }
     
+    
     // Get the balance robot application instance
     // The singleton is already initialized in InitBalanceRobotApp
     APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
-    
-    // Register fall detection callback
-    balance_app.RegisterCallback(APP::EVENT_FALL_DETECTED, FallDetectedCallback, nullptr);
-    
-    // Create FreeRTOS tasks
-    // Balance task - higher priority as it needs to run at consistent intervals
-    BaseType_t result = xTaskCreate(
-        BalanceTaskFunction,           // Task function
-        "BalanceTask",                 // Task name
-        256,                           // Stack size (words)
-        nullptr,                       // Parameters
-        tskIDLE_PRIORITY + 3,          // Priority
-        &s_balance_task_handle         // Task handle
-    );
-    
-    if (result != pdPASS) {
-        // Task creation failed
-        while (1) {
-            // Can't continue without the balance task
+
+    // Check for calibration (add this if not already there)
+    Middleware::Storage::StorageManager& storage = Middleware::Storage::StorageManager::GetInstance();
+    if (!storage.HasValidCalibrationData()) {
+        // Need to calibrate before starting
+        Platform::Status calibration_success = balance_app.CalibrateIMU();
+        if (calibration_success != Platform::Status::OK) {
+            // Handle calibration failure
+            while(1) {}
         }
     }
+    // Create and start tasks
+    balance_app.InitializeTasks();
     
-    // Monitor task - lower priority, mostly for supervision
-    result = xTaskCreate(
-        MonitorTaskFunction,           // Task function
-        "MonitorTask",                 // Task name
-        128,                           // Stack size (words)
-        nullptr,                       // Parameters
-        tskIDLE_PRIORITY + 1,          // Priority
-        &s_monitor_task_handle         // Task handle
-    );
+    // Start the application
+    balance_app.Start();  // This will call balance_controller->Start()
     
-    if (result != pdPASS) {
-        // Task creation failed - not critical, could continue without monitor
-    }
-    
-    // Start the robot initially
-    balance_app.Start();
-    
-    // Start the FreeRTOS scheduler
+    // Start the scheduler
     vTaskStartScheduler();
     
-    // We should never get here as the scheduler should take over
-    while (1) {
-        // Fallback loop in case scheduler fails
-    }
+    // Should never reach here
+    while(1) {}
     
     return 0;
 }
 
 extern "C" void TIM5_IRQHandler(void) {
+
+    static Platform::TIM::Registers* TIM5_REGS = Platform::TIM::getTimer(5);
+    static Platform::GPIO::GpioInterface *test_gpio  = &Platform::GPIO::GpioInterface::GetInstance();
     // Check if update interrupt flag is set
     if (TIM5_REGS->SR & static_cast<uint32_t>(Platform::TIM::SR::UIF)) {
         // Clear the interrupt flag

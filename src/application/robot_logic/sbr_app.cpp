@@ -1,52 +1,49 @@
-﻿// src/application/robot_logic/balance_app.cpp
+﻿// src/application/robot_logic/sbr_app.cpp
 
-#include "robot_logic/sbr_app.hpp"
-#include "middleware/system_services/system_timing.hpp"
-#include "system_services/error.hpp"
-#include "hardware_abstraction/i2c.hpp"
-#include "hardware_abstraction/gpio.hpp"
-#include "middleware/system_services/error.hpp"
-#include <math.h>
-
+#include "application/robot_logic/sbr_app.hpp"
+#include "math.h"
+#include "storage_manager.hpp"
 namespace APP {
 
-// Singleton instance
-static BalanceRobotApp* s_instance = nullptr;
+// Initialize static instance pointer
+BalanceRobotApp* BalanceRobotApp::instance = nullptr;
 
 // Constructor
 BalanceRobotApp::BalanceRobotApp() 
     : current_state(AppState::Initializing),
-      prev_error(0.0f),
-      integral_sum(0.0f),
-      last_control_time(0),
       imu(nullptr),
       motor_left(nullptr),
       motor_right(nullptr),
-      timing_service(nullptr) {
+      timing_service(nullptr),
+      current_emergency(EmergencyType::None),
+      fall_detection_threshold(150.0f) {
     
-    // Initialize status data
-    status.current_angle = 0.0f;
-    status.target_angle = 0.0f;
-    status.motor_speed = 0.0f;
-    status.pid_output = 0.0f;
-    status.p_term = 0.0f;
-    status.i_term = 0.0f;
-    status.d_term = 0.0f;
-    status.loop_time_us = 0;
-    status.is_balanced = false;
-    status.motor_enabled = false;
+    // Store system start time
+    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
+    robot_timing.system_start_time = timing_service->GetMilliseconds();
 }
 
 // Destructor
 BalanceRobotApp::~BalanceRobotApp() {
-    // The peripheral interfaces are singletons, no need to delete them
-    s_instance = nullptr;
+    // Ensure clean shutdown
+    if (current_state != AppState::Shutdown) {
+        Stop();
+    }
+    
+    // Clean up any dynamically allocated resources
+    if (motor_left) delete motor_left;
+    if (motor_right) delete motor_right;
+    
+    // Reset singleton instance
+    instance = nullptr;
 }
 
 // Singleton accessor
 BalanceRobotApp& BalanceRobotApp::GetInstance() {
-    static BalanceRobotApp instance;
-    return instance;
+    if (!instance) {
+        instance = new BalanceRobotApp();
+    }
+    return *instance;
 }
 
 // Get current application state
@@ -54,256 +51,520 @@ AppState BalanceRobotApp::GetState() const {
     return current_state;
 }
 
-// Initialize the self-balancing robot
+// Initialize the application
 Platform::Status BalanceRobotApp::Init(void* config_ptr) {
-    if (current_state != AppState::Initializing && current_state != AppState::Error) {
-        return Platform::Status::INVALID_STATE;
-    }
-
     // Set default configuration if none provided
     if (config_ptr != nullptr) {
-        config = *static_cast<BalanceRobotConfig*>(config_ptr);
+        RobotConfig = *static_cast<BalanceRobotConfig*>(config_ptr);
     } else {
-        // Default configuration
-        config.imu_config.i2c_instance = Platform::I2C::I2CInstance::I2C1;
-        config.imu_config.device_address = 0x68; // Default MPU6050 address
-        config.imu_config.gyro_range = 1;        // ±500°/s
-        config.imu_config.accel_range = 1;       // ±4g
-        config.imu_config.dlpf_mode = 3;         // 44Hz low pass filter
-        config.imu_config.sample_rate_div = 9;   // 100Hz sampling (1kHz / (1 + 9))
-        config.imu_config.interrupt_enabled = true;
+        // Configure IMU
+        RobotConfig.imu_config.i2c_config.i2c_instance = Platform::I2C::I2CInstance::I2C1;
+        RobotConfig.imu_config.device_address = 0x68; // Default MPU6050 address
+        RobotConfig.imu_config.gyro_range = 0;        // ±250°/s
+        RobotConfig.imu_config.accel_range = 0;       // ±2g
+        RobotConfig.imu_config.dlpf_mode = 3;         // 44Hz low pass filter
+        RobotConfig.imu_config.sample_rate_div = 9;   // 100Hz sampling (1kHz / (1 + 9))
+        RobotConfig.imu_config.interrupt_enabled = true;
+        RobotConfig.imu_config.enable_data_ready_interrupt = true;
+        RobotConfig.imu_config.data_ready_port = Platform::GPIO::Port::PORTB;
+        RobotConfig.imu_config.data_ready_pin = 8;
         
-        // Default PID settings - these will need tuning for your specific robot
-        config.pid_config.kp = 10.0f;
-        config.pid_config.ki = 0.1f;
-        config.pid_config.kd = 0.5f;
-        config.pid_config.setpoint = 0.0f;      // Upright position
-        config.pid_config.output_limit = 100.0f; // Max motor output
-        config.pid_config.integral_limit = 50.0f; // Prevent integral windup
+        // Configure left motor
+        RobotConfig.motor_left_config.pwm_config.timer_instance = Platform::TIM::TimerInstance::TIM1;
+        RobotConfig.motor_left_config.pwm_config.frequency = 20000;  // 20kHz
+        RobotConfig.motor_left_config.pwm_ch_config.channel = Platform::PWM::PWMChannel::Channel3;
+        RobotConfig.motor_left_config.pwm_ch_config.gpio_port = Platform::GPIO::Port::PORTA;
+        RobotConfig.motor_left_config.pwm_ch_config.gpio_pin = 10;
+        RobotConfig.motor_left_config.pwm_ch_config.gpio_af = Platform::GPIO::AlternateFunction::AF1;
+        RobotConfig.motor_left_config.ina_port = Platform::GPIO::Port::PORTC;
+        RobotConfig.motor_left_config.ina_pin = 6;
+        RobotConfig.motor_left_config.inb_port = Platform::GPIO::Port::PORTC;
+        RobotConfig.motor_left_config.inb_pin = 7;
+        RobotConfig.motor_left_config.use_enable_pin = false;
+        RobotConfig.motor_left_config.use_current_sensing = false;
+        RobotConfig.motor_left_config.use_diag_pin = false;
+        RobotConfig.motor_left_config.min_duty_cycle = 0;
+        RobotConfig.motor_left_config.max_duty_cycle = 9000;
+        RobotConfig.motor_left_config.acceleration_rate = 2000;
         
-        config.control_loop_interval_ms = 10;    // 100Hz control loop
-        config.enable_debug_output = true;
-    }
-
-    // Get hardware interfaces
-    timing_service = &Middleware::SystemServices::SystemTiming::GetInstance();
-    if (!timing_service->IsInitialized()) {
-        return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
+        // Configure right motor (similar to left but with different pins)
+        RobotConfig.motor_right_config = RobotConfig.motor_left_config;
+        RobotConfig.motor_right_config.pwm_ch_config.channel = Platform::PWM::PWMChannel::Channel2;
+        RobotConfig.motor_right_config.pwm_ch_config.gpio_pin = 9;
+        RobotConfig.motor_right_config.ina_port = Platform::GPIO::Port::PORTA;
+        RobotConfig.motor_right_config.ina_pin = 8;
+        RobotConfig.motor_right_config.inb_port = Platform::GPIO::Port::PORTB;
+        RobotConfig.motor_right_config.inb_pin = 2;
     }
     
-    // Initialize I2c Interface
-    Platform::I2C::I2CInterface *i2c_interface = &Platform::I2C::I2CInterface::GetInstance(config.imu_config.i2c_instance);
-    Platform::Status status = i2c_interface->Init(&config.imu_config);
+    // Initialize hardware interfaces
+    Platform::Status status = InitializeHardware();
     if (status != Platform::Status::OK) {
-        // Log error and return
-        Middleware::SystemServices::ERROR::ERROR_LOG(
-            Middleware::SystemServices::ERROR::MODULE_APPLICATION_MAIN,
-            Middleware::SystemServices::ERROR::ERR_INITIALIZATION,
-            status
-        );
-        current_state = AppState::Error;
-        return status;
-    }
-
-    // Initialize IMU (MPU6050) Driver
-    imu = &Drivers::Sensors::MPU6050::CreateMPU6050();
-    
-    status = imu->Init(&config.imu_config);
-    if (status != Platform::Status::OK) {
-        // Log error and return
-        Middleware::SystemServices::ERROR::ERROR_LOG(
-            Middleware::SystemServices::ERROR::MODULE_APPLICATION_MAIN,
-            Middleware::SystemServices::ERROR::ERR_INITIALIZATION,
-            status
-        );
-        current_state = AppState::Error;
         return status;
     }
     
-    // Register IMU data ready callback
-    imu->RegisterCallback(Drivers::Sensors::MPU6050_EVENT_DATA_READY, IMUDataReadyCallback, this);
-
-    // Initialize PWM Interface
-    Platform::PWM::PWMInterface *pwm_interface = &Platform::PWM::PWMInterface::GetInstance();
-    status = pwm_interface->Init(&config.motor_left_config.pwm_config);
+    // Initialize components
+    status = InitializeComponents();
     if (status != Platform::Status::OK) {
-        // Log error and return
-        Middleware::SystemServices::ERROR::ERROR_LOG(
-            Middleware::SystemServices::ERROR::MODULE_APPLICATION_MAIN,
-            Middleware::SystemServices::ERROR::ERR_INITIALIZATION,
-            status
-        );
-        current_state = AppState::Error;
-        return status;
-    }
-    // Initialize motor drivers
-    motor_left = new Drivers::Motor::VNH5019Driver();
-    status = motor_left->Init(&config.motor_left_config);
-    if (status != Platform::Status::OK) {
-        current_state = AppState::Error;
         return status;
     }
     
-    motor_right = new Drivers::Motor::VNH5019Driver();
-    status = motor_right->Init(&config.motor_right_config);
-    if (status != Platform::Status::OK) {
-        current_state = AppState::Error;
-        return status;
-    }
-    
-    // Initialize PID controller state
-    ResetPIDState();
-    
-    // Set target angle from configuration
-    this->status.target_angle = config.pid_config.setpoint;
+    // Update status
+    this->status.balance_controller_ready = true;
+    //TODO:this->status.communication_ready = true;
+    //TODO:this->status.monitoring_ready = true;
     
     // Set state to initialized but idle
     current_state = AppState::Idle;
     return Platform::Status::OK;
 }
 
-// Start balancing operation
+// Initialize hardware interfaces
+Platform::Status BalanceRobotApp::InitializeHardware() {
+    // Initialize I2C for IMU
+    Platform::I2C::I2CInterface* i2c_interface = &Platform::I2C::I2CInterface::GetInstance(RobotConfig.imu_config.i2c_config.i2c_instance);
+    Platform::Status status = i2c_interface->Init(&RobotConfig.imu_config);
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    
+    // Initialize IMU
+    imu = &Drivers::Sensors::MPU6050::CreateMPU6050();
+    status = imu->Init(&RobotConfig.imu_config);
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    
+    // Register IMU data ready callback
+    imu->RegisterCallback(
+        Drivers::Sensors::MPU6050_EVENT_DATA_AVAILABLE,
+        IMUDataReadyCallback,
+        this
+    );
+    
+    imu->RegisterCallback(
+        Drivers::Sensors::MPU6050_EVENT_DATA_AVAILABLE,
+        IMUDataAvailableCallback,
+        this
+    );
+    // Initialize PWM interface for motors
+    Platform::PWM::PWMInterface* pwm_interface = &Platform::PWM::PWMInterface::GetInstance();
+    status = pwm_interface->Init(&RobotConfig.motor_left_config.pwm_config);
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    
+    // Initialize motor drivers
+    motor_left = new Drivers::Motor::VNH5019Driver();
+    status = motor_left->Init(&RobotConfig.motor_left_config);
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    
+    motor_right = new Drivers::Motor::VNH5019Driver();
+    status = motor_right->Init(&RobotConfig.motor_right_config);
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    
+    return Platform::Status::OK;
+}
+
+// Initialize components
+Platform::Status BalanceRobotApp::InitializeComponents() {
+    // Create and initialize balance controller
+    balance_controller = std::make_unique<BalanceController>();
+    Platform::Status status = balance_controller->Init(static_cast<Drivers::Sensors::MPU6050*>(imu), \
+                                                       static_cast<Drivers::Motor::VNH5019Driver*>(motor_left), \
+                                                       static_cast<Drivers::Motor::VNH5019Driver*>(motor_right), \
+                                                       static_cast<APP::PIDConfig*>(&RobotConfig.pid_config));
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    // Create and initialize SBUS communicator
+    sbus_comm = std::make_unique<SBUSCommunicator>();
+    status = sbus_comm->Init(nullptr);  // Pass actual UART interface if needed
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    
+    // Create and initialize system monitor
+    system_monitor = std::make_unique<SystemMonitor>();
+    status = system_monitor->Init(nullptr);
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }
+    
+    // Create and initialize error logger
+    error_logger = std::make_unique<ErrorLogger>();
+    status = error_logger->Init(nullptr);
+    if (status != Platform::Status::OK) {
+        current_state = AppState::Error;
+        return status;
+    }*/
+    
+    return Platform::Status::OK;
+}
+
+// Start the application
 Platform::Status BalanceRobotApp::Start() {
     if (current_state != AppState::Idle && current_state != AppState::Calibration) {
         return Platform::Status::INVALID_STATE;
     }
     
-    // Reset PID state before starting
-    ResetPIDState();
+    // Start components
+    Platform::Status status = balance_controller->Start();
+    if (status != Platform::Status::OK) {
+        return status;
+    }
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    status = sbus_comm->Start();
+    if (status != Platform::Status::OK) {
+        balance_controller->Stop();
+        return status;
+    }
     
-    // Enable motors
-    motor_left->Enable();
-    motor_right->Enable();
-    status.motor_enabled = true;
-    
-    // Update last control time
-    last_control_time = timing_service->GetMicroseconds();
-    
+    status = system_monitor->Start();
+    if (status != Platform::Status::OK) {
+        balance_controller->Stop();
+        sbus_comm->Stop();
+        return status;
+    }
+    */
     // Set state to running
     current_state = AppState::Running;
     return Platform::Status::OK;
 }
 
-// Stop balancing operation
+// Stop the application
 Platform::Status BalanceRobotApp::Stop() {
     if (current_state != AppState::Running) {
         return Platform::Status::INVALID_STATE;
     }
     
-    // Stop motors
-    motor_left->Stop(true);  // Brake
-    motor_right->Stop(true); // Brake
-    status.motor_enabled = false;
-    
+    // Stop components
+    balance_controller->Stop();
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    sbus_comm->Stop();
+    system_monitor->Stop();
+    */
     // Set state to idle
     current_state = AppState::Idle;
     return Platform::Status::OK;
 }
 
-// Process function - called periodically to update state
 Platform::Status BalanceRobotApp::Process(void* params) {
-    if (current_state != AppState::Running) {
-        return Platform::Status::OK; // Nothing to do if not running
+    // Determine which processes to run
+    ProcessType process_type = ProcessType::All;
+    if (params != nullptr) {
+        process_type = *static_cast<ProcessType*>(params);
     }
     
-    // Get current time for control loop timing
-    uint64_t current_time = timing_service->GetMicroseconds();
-    uint64_t elapsed_time = current_time - last_control_time;
-    
-    // Check if it's time to run the control loop
-    if (elapsed_time < (config.control_loop_interval_ms * 1000)) {
-        return Platform::Status::OK; // Not time yet
+    // Start timing based on process type
+    switch (process_type) {
+        case ProcessType::Balancing:
+            StartTiming(robot_timing.balance_control);
+            break;
+        case ProcessType::Communication:
+            StartTiming(robot_timing.communication);
+            break;
+        case ProcessType::Monitoring:
+            StartTiming(robot_timing.monitoring);
+            break;
+        case ProcessType::ErrorLogging:
+            StartTiming(robot_timing.error_logging);
+            break;
+        case ProcessType::All:
+            StartTiming(robot_timing.main_loop);
+            break;
     }
     
-    // Update control loop timing
-    last_control_time = current_time;
-    
-    // Measure execution time
-    uint64_t start_time = timing_service->GetMicroseconds();
-    
-    // Read current angle from IMU
-    float current_angle = ReadAngle();
-    status.current_angle = current_angle;
-    
-    // Check if robot has fallen over
-    if (CheckFallDetection(current_angle)) {
-        // Robot has fallen, stop motors
-        motor_left->Stop(true);
-        motor_right->Stop(true);
-        status.is_balanced = false;
+    // Check for emergency conditions first
+    if (current_emergency != EmergencyType::None) {
+        HandleEmergencyCondition(current_emergency);
         
-        // Trigger fall detected event
-        if (callbacks.find(EVENT_FALL_DETECTED) != callbacks.end() && 
-            callbacks[EVENT_FALL_DETECTED].active) {
-            callbacks[EVENT_FALL_DETECTED].callback(callbacks[EVENT_FALL_DETECTED].param);
-        }
-        
-        // Set state to idle, waiting for restart
-        current_state = AppState::Idle;
+        // End timing based on process type
+        EndProcessTiming(process_type);
         return Platform::Status::OK;
     }
     
-    // If we get here, the robot is still upright
-    status.is_balanced = true;
+    // Process based on current state and requested process type
+    switch (process_type) {
+        case ProcessType::Balancing:
+            if (current_state == AppState::Running) {
+                ProcessBalancing();
+            }
+            break;
+            
+        case ProcessType::Communication:
+            ProcessCommunication();
+            break;
+            
+        case ProcessType::Monitoring:
+            ProcessMonitoring();
+            break;
+            
+        case ProcessType::ErrorLogging:
+            ProcessErrorLogging();
+            break;
+            
+        case ProcessType::All:
+            // Process everything based on current state
+            switch (current_state) {
+                case AppState::Running:
+                    ProcessBalancing();
+                    ProcessCommunication();
+                    ProcessMonitoring();
+                    ProcessErrorLogging();
+                    break;
+                    
+                case AppState::Idle:
+                    // No balancing in idle state
+                    ProcessCommunication();
+                    ProcessMonitoring();
+                    ProcessErrorLogging();
+                    break;
+                    
+                case AppState::Calibration:
+                    // Only monitoring during calibration
+                    ProcessMonitoring();
+                    ProcessErrorLogging();
+                    break;
+                    
+                case AppState::Error:
+                    // Only error logging in error state
+                    ProcessErrorLogging();
+                    break;
+                    
+                default:
+                    break;
+            }
+            break;
+    }   
+    // Update system metrics
+    status.uptime_ms = timing_service->GetMilliseconds() - robot_timing.system_start_time;
     
-    // Run PID controller to get motor output
-    float pid_output = RunPIDController(current_angle);
-    status.pid_output = pid_output;
-    
-    // Apply motor output to keep robot balanced
-    SetMotorSpeeds(pid_output);
-    
-    // Calculate loop execution time
-    status.loop_time_us = timing_service->GetMicroseconds() - start_time;
-    
-    // Trigger balance update event if callback registered
-    if (callbacks.find(EVENT_BALANCE_UPDATE) != callbacks.end() && 
-        callbacks[EVENT_BALANCE_UPDATE].active) {
-        callbacks[EVENT_BALANCE_UPDATE].callback(callbacks[EVENT_BALANCE_UPDATE].param);
+    // Update frequency metrics based on process type
+    switch (process_type) {
+        case ProcessType::Balancing:
+            status.balance_loop_freq_hz = robot_timing.balance_control.execution_frequency_hz;
+            break;
+        case ProcessType::Communication:
+            status.comm_loop_freq_hz = robot_timing.communication.execution_frequency_hz;
+            break;
+        case ProcessType::All:
+            status.main_loop_freq_hz = robot_timing.main_loop.execution_frequency_hz;
+            break;
     }
     
-    // Debug output if enabled
-    if (config.enable_debug_output) {
-        DebugOutput(status);
-    }
-    
+    // End timing based on process type
+    EndProcessTiming(process_type);
     return Platform::Status::OK;
+}
+
+// Helper function to end timing based on process type
+void BalanceRobotApp::EndProcessTiming(ProcessType process_type) {
+    switch (process_type) {
+        case ProcessType::Balancing:
+            EndTiming(robot_timing.balance_control);
+            break;
+        case ProcessType::Communication:
+            EndTiming(robot_timing.communication);
+            break;
+        case ProcessType::Monitoring:
+            EndTiming(robot_timing.monitoring);
+            break;
+        case ProcessType::ErrorLogging:
+            EndTiming(robot_timing.error_logging);
+            break;
+        case ProcessType::All:
+            EndTiming(robot_timing.main_loop);
+            break;
+    }
+}
+
+// Process balancing functionality
+Platform::Status BalanceRobotApp::ProcessBalancing(void* params) {
+    // Only process balancing in appropriate states
+    if (current_state != AppState::Running) {
+        return Platform::Status::INVALID_STATE;
+    }
+    
+    // Get current timestamp for consistent timing
+    uint64_t current_timestamp_us = timing_service->GetMicroseconds();
+    
+    // Extract IMU data from parameters
+    Drivers::Sensors::MPU6050Data imu_data;
+    if (params != nullptr) {
+        imu_data = *static_cast<Drivers::Sensors::MPU6050Data*>(params);
+    } else {
+        // If no data provided, could use most recent data from status
+        imu_data = status.imu_data;
+    }
+    
+    // Process balance control - pass down the current timestamp
+    Platform::Status status = balance_controller->Process(imu_data, current_timestamp_us);
+    
+    // Record the timestamp for tracking execution frequency
+    robot_timing.balance_control.last_execution_time_us = 
+        timing_service->GetMicroseconds() - current_timestamp_us;
+    
+    return status;
+}
+
+// Process communication functionality
+Platform::Status BalanceRobotApp::ProcessCommunication(void* params) {
+
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    // Can process communication in most states
+    if (current_state == AppState::Error) {
+        return Platform::Status::INVALID_STATE;
+    }
+    
+    // Time the communication processing
+    StartTiming(robot_timing.communication);
+    
+    // Process communication
+    Platform::Status status = sbus_comm->Process();
+    
+    // Update control inputs from remote
+    if (status == Platform::Status::OK) {
+        status.steering_input = sbus_comm->GetSteeringCommand();
+        status.throttle_input = sbus_comm->GetThrottleCommand();
+        
+        // Check for emergency stop command from remote
+        if (sbus_comm->IsEmergencyStopActive()) {
+            EmergencyStop(true);
+        }
+    }
+    
+    // End timing
+    EndTiming(robot_timing.communication);
+    
+    return status;
+    */
+}
+
+// Process monitoring functionality
+Platform::Status BalanceRobotApp::ProcessMonitoring(void* params) {
+    // Can process monitoring in any state
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    // Time the monitoring processing
+    StartTiming(robot_timing.monitoring);
+    
+    // Process system monitoring
+    Platform::Status status = system_monitor->Process();
+    
+    // Update battery status
+    if (status == Platform::Status::OK) {
+        status.battery_voltage = system_monitor->GetBatteryVoltage();
+        status.battery_percentage = system_monitor->GetBatteryPercentage();
+        
+        // Check for low battery condition
+        if (status.battery_percentage < 10 && !status.emergency_stop_active) {
+            current_emergency = EmergencyType::BatteryLow;
+        }
+    }
+    
+    // Update CPU usage
+    status.cpu_usage_percent = system_monitor->GetCPUUsage();
+    
+    // End timing
+    EndTiming(robot_timing.monitoring);
+    
+    return status;
+    */
+}
+
+// Process error logging functionality
+Platform::Status BalanceRobotApp::ProcessErrorLogging(void* params) {
+    // Can process error logging in any state
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    // Time the error logging processing
+    StartTiming(robot_timing.error_logging);
+    
+    // Process error logging
+    Platform::Status status = error_logger->Process();
+    
+    // Log current state if in error state
+    if (current_state == AppState::Error) {
+        error_logger->LogError("System in error state", 0);
+    }
+    
+    // End timing
+    EndTiming(robot_timing.error_logging);
+    
+    return status;
+    */
 }
 
 // Handle application commands
 Platform::Status BalanceRobotApp::HandleCommand(uint32_t cmd_id, void* params) {
     switch (cmd_id) {
-        case BALANCE_ROBOT_CMD_UPDATE_PID:
+        case APP_CMD_SET_MODE: {
             if (params == nullptr) {
                 return Platform::Status::INVALID_PARAM;
             }
-            return UpdatePIDParameters(*static_cast<PIDConfig*>(params));
             
-        case BALANCE_ROBOT_CMD_CALIBRATE_IMU:
+            AppState new_state = *static_cast<AppState*>(params);
+            if (new_state == AppState::Running) {
+                return Start();
+            } else if (new_state == AppState::Idle) {
+                return Stop();
+            }
+            break;
+        }
+        case APP_CMD_GET_MODE: {
+            if (params == nullptr) {
+                return Platform::Status::INVALID_PARAM;
+            }
+            
+            *static_cast<AppState*>(params) = current_state;
+            return Platform::Status::OK;
+        }
+        case APP_CMD_START_CALIBRATION:
+            if (current_state != AppState::Idle) {
+                return Platform::Status::INVALID_STATE;
+            }
+            
+            current_state = AppState::Calibration;
             return CalibrateIMU();
             
-        case BALANCE_ROBOT_CMD_SET_TARGET_ANGLE:
+        case APP_CMD_START_SELF_TEST:
+            if (current_state != AppState::Idle) {
+                return Platform::Status::INVALID_STATE;
+            }
+            
+            current_state = AppState::SelfTest;
+            // TODO: Implement self-test
+            current_state = AppState::Idle;
+            return Platform::Status::OK;
+            
+        // Custom commands for balance robot
+        case 0x4001:  // Example: Set target angle
             if (params == nullptr) {
                 return Platform::Status::INVALID_PARAM;
             }
+            
             return SetTargetAngle(*static_cast<float*>(params));
             
-        case BALANCE_ROBOT_CMD_ENABLE_MOTORS:
-            if (params == nullptr) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            return EnableMotors(*static_cast<bool*>(params));
-            
-        case BALANCE_ROBOT_CMD_GET_BALANCE_STATUS:
-            if (params == nullptr) {
-                return Platform::Status::INVALID_PARAM;
-            }
-            *static_cast<BalanceRobotStatus*>(params) = status;
-            return Platform::Status::OK;
+        case 0x4002:  // Example: Emergency stop
+            return EmergencyStop(true);
             
         default:
             return Platform::Status::NOT_SUPPORTED;
     }
+    
+    return Platform::Status::OK;
 }
 
 // Get application status
@@ -312,13 +573,14 @@ Platform::Status BalanceRobotApp::GetStatus(void* status_ptr, uint32_t* size) {
         return Platform::Status::INVALID_PARAM;
     }
     
-    if (*size < sizeof(BalanceRobotStatus)) {
-        *size = sizeof(BalanceRobotStatus);
+    if (*size < sizeof(RobotAppStatus)) {
+        *size = sizeof(RobotAppStatus);
         return Platform::Status::BUFFER_OVERFLOW;
     }
     
-    *static_cast<BalanceRobotStatus*>(status_ptr) = status;
-    *size = sizeof(BalanceRobotStatus);
+    // Copy status to output buffer
+    *static_cast<RobotAppStatus*>(status_ptr) = status;
+    *size = sizeof(RobotAppStatus);
     
     return Platform::Status::OK;
 }
@@ -337,65 +599,297 @@ Platform::Status BalanceRobotApp::RegisterCallback(uint32_t event, void (*callba
     return Platform::Status::OK;
 }
 
-// Update PID parameters
-Platform::Status BalanceRobotApp::UpdatePIDParameters(const PIDConfig& pid_params) {
-    config.pid_config = pid_params;
+// IMU data ready callback
+// Data ready callback - Just initiate read if needed
+void BalanceRobotApp::IMUDataReadyCallback(void* param) {
+    BalanceRobotApp* app = static_cast<BalanceRobotApp*>(param);
+    if (!app) return;
     
-    // Update target angle in status
-    status.target_angle = pid_params.setpoint;
+    // Start timing
+    app->StartTiming(app->robot_timing.imu_callback);
     
-    // Reset integral term when changing PID parameters
-    integral_sum = 0.0f;
+    // If in manual mode, trigger read
+    if (app->RobotConfig.imu_config.operating_mode == Drivers::Sensors::MPU6050_MODE_MANUAL) {
+        app->imu->ReadDataAsync();
+    }
+    
+    // End timing
+    app->EndTiming(app->robot_timing.imu_callback);
+}
+
+// Data available callback - Just wake up task
+void BalanceRobotApp::IMUDataAvailableCallback(void* param) {
+    BalanceRobotApp* app = static_cast<BalanceRobotApp*>(param);
+    if (!app) return;
+    
+    // Start timing
+    app->StartTiming(app->robot_timing.imu_callback);
+    
+    app->imu->GetProcessedData(&app->status.imu_data);
+
+    if (app->xBalancingTaskHandle) {
+        BaseType_t higher_priority_task_woken = pdFALSE;
+        vTaskNotifyGiveFromISR(app->xBalancingTaskHandle, &higher_priority_task_woken);
+        portYIELD_FROM_ISR(higher_priority_task_woken);
+    }
+    
+    // End timing
+    app->EndTiming(app->robot_timing.imu_callback);
+}
+// Start timing measurement
+void BalanceRobotApp::StartTiming(ComponentTiming& timing) {
+    timing.last_execution_timestamp = timing_service->GetMicroseconds();
+}
+
+// End timing measurement and update statistics
+void BalanceRobotApp::EndTiming(ComponentTiming& timing) {
+    uint64_t end_time = timing_service->GetMicroseconds();
+    uint32_t execution_time = end_time - timing.last_execution_timestamp;
+    
+    // Update timing statistics
+    timing.last_execution_time_us = execution_time;
+    
+    if (execution_time < timing.min_execution_time_us || timing.execution_count == 0) {
+        timing.min_execution_time_us = execution_time;
+    }
+    
+    if (execution_time > timing.max_execution_time_us) {
+        timing.max_execution_time_us = execution_time;
+    }
+    
+    // Update moving average (e.g., 90% old value, 10% new value)
+    timing.avg_execution_time_us = timing.execution_count == 0 ? 
+        execution_time : 
+        (timing.avg_execution_time_us * 9 + execution_time) / 10;
+    
+    // Update execution count
+    timing.execution_count++;
+    
+    // Calculate frequency if we have multiple executions
+    static uint64_t prev_timestamp = 0;
+    if (prev_timestamp != 0) {
+        uint32_t period_us = end_time - prev_timestamp;
+        if (period_us > 0) {  // Prevent division by zero
+            timing.execution_frequency_hz = 1000000 / period_us;
+        }
+    }
+    prev_timestamp = end_time;
+}
+
+// Emergency handling
+Platform::Status BalanceRobotApp::HandleEmergencyCondition(EmergencyType emergency) {
+    // Handle based on emergency type
+    switch (emergency) {
+        case EmergencyType::PossibleFall:
+            // Stop motors to prevent damage
+            motor_left->Stop(true);  // Brake
+            motor_right->Stop(true); // Brake
+            
+            // Log the emergency
+             //TODO::error_logger->LogError("Fall detected", 0x1001);
+            break;
+            
+            case EmergencyType::BatteryLow:
+            // Reduce power usage
+             //TODO::balance_controller->SetPowerSaving(true);
+            
+            // Notify user
+             //TODO::error_logger->LogWarning("Low battery detected", 0x2001);
+            
+            // Continue operation in power-saving mode
+            break;
+            
+        case EmergencyType::MotorOverheat:
+            // Reduce motor power
+             //TODO::balance_controller->SetPowerLimit(50);  // 50% power limit
+            
+            // Log the warning
+             //TODO::error_logger->LogWarning("Motor temperature high", 0x2002);
+            break;
+            
+        case EmergencyType::ControllerTimeout:
+            // Safe shutdown of balance control
+            balance_controller->Stop();
+            
+            // Log the error
+             //TODO::error_logger->LogError("Controller communication timeout", 0x1002);
+            
+            // Switch to idle state
+            current_state = AppState::Idle;
+            break;
+            
+        case EmergencyType::UserTriggered:
+            // Full emergency stop
+            motor_left->Stop(true);  // Brake
+            motor_right->Stop(true); // Brake
+            
+            // Set emergency flag
+            status.emergency_stop_active = true;
+            
+            // Log the event
+             //TODO::error_logger->LogInfo("User emergency stop activated", 0x3001);
+            
+            // Switch to idle state
+            current_state = AppState::Idle;
+            break;
+            
+        default:
+            return Platform::Status::INVALID_PARAM;
+    }
     
     return Platform::Status::OK;
 }
 
-// Calibrate the IMU sensor
-Platform::Status BalanceRobotApp::CalibrateIMU() {
-    if (current_state == AppState::Running) {
-        // Need to stop balancing to calibrate
-        Stop();
+// Recover from emergency
+Platform::Status BalanceRobotApp::RecoverFromEmergency() {
+    // Clear emergency state
+    EmergencyType previous_emergency = current_emergency;
+    current_emergency = EmergencyType::None;
+    
+    // Take recovery actions based on previous emergency
+    switch (previous_emergency) {
+        case EmergencyType::PossibleFall:
+            // Reset balance controller
+             //TODO::balance_controller->Reset();
+            
+            // Return to idle state, requiring manual restart
+            current_state = AppState::Idle;
+            break;
+            
+        case EmergencyType::BatteryLow:
+            // Keep power saving enabled until battery is charged
+            // Only clear emergency flag
+            break;
+            
+        case EmergencyType::MotorOverheat:
+            // Restore normal power limits after cooldown period
+             //TODO::balance_controller->SetPowerLimit(100);  // 100% power
+            break;
+            
+        case EmergencyType::ControllerTimeout:
+            // Require manual restart after timeout
+            current_state = AppState::Idle;
+            break;
+            
+        case EmergencyType::UserTriggered:
+            // Clear emergency stop flag
+            status.emergency_stop_active = false;
+            
+            // Require manual restart
+            current_state = AppState::Idle;
+            break;
+            
+        default:
+            return Platform::Status::INVALID_PARAM;
     }
     
-    // Set state to calibration
-    current_state = AppState::Calibration;
+    // Log recovery
+    //TODO::error_logger->LogInfo("Recovered from emergency condition", 0x3002);
     
-    // Perform IMU calibration - this might take some time
-    Platform::Status status = imu->Control(Drivers::Sensors::MPU6050_CTRL_CALIBRATE_GYRO, nullptr);
-    if (status != Platform::Status::OK) {
-        current_state = AppState::Error;
-        return status;
-    }
-    
-    // Calibrate accelerometer
-    status = imu->Control(Drivers::Sensors::MPU6050_CTRL_CALIBRATE_ACCEL, nullptr);
-    if (status != Platform::Status::OK) {
-        current_state = AppState::Error;
-        return status;
-    }
-    
-    // Reset PID state
-    ResetPIDState();
-    
-    // Return to idle state
-    current_state = AppState::Idle;
     return Platform::Status::OK;
 }
 
-// Set target angle (for adjusting balance point)
+// Emergency stop
+Platform::Status BalanceRobotApp::EmergencyStop(bool user_triggered) {
+    // Set emergency type
+    current_emergency = user_triggered ? 
+        EmergencyType::UserTriggered : 
+        EmergencyType::ControllerTimeout;
+    
+    // Handle the emergency
+    return HandleEmergencyCondition(current_emergency);
+}
+
+// Set target angle
 Platform::Status BalanceRobotApp::SetTargetAngle(float angle) {
-    // Limit target angle to reasonable values (-15 to +15 degrees)
-    if (angle < -15.0f || angle > 15.0f) {
-        return Platform::Status::INVALID_PARAM;
-    }
-    
-    config.pid_config.setpoint = angle;
-    status.target_angle = angle;
-    
-    return Platform::Status::OK;
+    // Forward to balance controller
+    return balance_controller->SetTargetAngle(angle);
 }
 
-// Toggle motor enable/disable
+// Set PID parameters
+Platform::Status BalanceRobotApp::SetPIDParameters(const PIDConfig& config) {
+    // Forward to balance controller
+    return balance_controller->UpdatePIDParameters(config);
+}
+
+// Calibrate IMU
+Platform::Status BalanceRobotApp::CalibrateIMU(void) {
+
+    // Static variable to track if calibration is in progress
+    static bool calibration_in_progress = false;
+    
+    // Get direct access to the MPU6050 instance
+    Drivers::Sensors::MPU6050* mpu = static_cast<Drivers::Sensors::MPU6050*>(imu);
+    
+    Middleware::SystemServices::SystemTiming* timing_service = &Middleware::SystemServices::GetSystemTiming();
+
+    if (!calibration_in_progress) {
+        // Initialize calibration
+        status.calibration.Reset();
+        status.calibration.calib_start_time_ms = timing_service->GetMilliseconds();
+        
+        // Start the calibration process
+        calibration_in_progress = true;
+    }
+    
+    // Check calibration status
+    Platform::Status calib_status = mpu->Control(
+        Drivers::Sensors::MPU6050_CTRL_CALIBRATE_ITERATIVE, 
+        nullptr
+    );
+    
+    // Handle calibration result
+    if (calib_status == Platform::Status::OK) {
+        // Calibration completed successfully
+        
+        // Read the final offsets
+        int16_t gyro_offsets[3];
+        int16_t accel_offsets[3];
+
+        calib_status = mpu->Control(Drivers::Sensors::MPU6050_CTRL_GET_GYRO_OFFSETS, gyro_offsets);
+        if(calib_status != Platform::Status::OK){
+            return Platform::Status::ERROR;
+        }
+        calib_status = mpu->Control(Drivers::Sensors::MPU6050_CTRL_GET_ACCEL_OFFSETS, accel_offsets);
+        if(calib_status != Platform::Status::OK){
+            return Platform::Status::ERROR;
+        }
+        // Store the offsets in the calibration structure
+        status.calibration.hw_gyro_offset[0] = gyro_offsets[0];
+        status.calibration.hw_gyro_offset[1] = gyro_offsets[1];
+        status.calibration.hw_gyro_offset[2] = gyro_offsets[2];
+        
+        status.calibration.hw_accel_offset[0] = accel_offsets[0];
+        status.calibration.hw_accel_offset[1] = accel_offsets[1];
+        status.calibration.hw_accel_offset[2] = accel_offsets[2];
+        
+        // Save calibration duration
+        status.calibration.calib_duration_ms = 
+            timing_service->GetMilliseconds() - status.calibration.calib_start_time_ms;
+        
+        // Mark calibration as complete
+        status.calibration.calibration_complete = true;
+        
+        // Save to flash memory
+        Middleware::Storage::StorageManager& storage = Middleware::Storage::StorageManager::GetInstance();
+        
+        storage.SaveCalibrationData(status.calibration);
+        
+        // Reset for next time
+        calibration_in_progress = false;
+        
+    }
+    else if (calib_status == Platform::Status::ERROR) {
+        // Calibration failed
+        
+        // Mark as not in progress
+        calibration_in_progress = false;
+        
+    }
+    return calib_status;
+}
+
+// Enable/disable motors
 Platform::Status BalanceRobotApp::EnableMotors(bool enable) {
     if (enable) {
         motor_left->Enable();
@@ -410,148 +904,77 @@ Platform::Status BalanceRobotApp::EnableMotors(bool enable) {
     return Platform::Status::OK;
 }
 
-// Private methods
-
-// Read sensor data and compute the current angle
-float BalanceRobotApp::ReadAngle() {
-    // Read IMU sensor data
-    Drivers::Sensors::MPU6050Data imu_data;
-    imu->ReadData(&imu_data, sizeof(imu_data));
-    
-    // Calculate tilt angle using accelerometer and gyroscope data (complementary filter)
-    // First, calculate accelerometer-based angle (from gravity)
-    float accel_angle = atan2f(imu_data.accel_x_g, sqrtf(imu_data.accel_y_g * imu_data.accel_y_g + 
-                                                         imu_data.accel_z_g * imu_data.accel_z_g)) * 180.0f / M_PI;
-    
-    // Get time delta in seconds for gyro integration
-    float dt = (imu_data.timestamp_ms - last_control_time / 1000.0f) / 1000.0f;
-    if (dt <= 0.0f || dt > 0.1f) {
-        // Invalid time delta, use a reasonable default
-        dt = 0.01f;
-    }
-    
-    // Complementary filter: combine accelerometer angle and gyro rate
-    // Typically 98% gyro and 2% accelerometer for smooth, drift-free angle
-    static float filtered_angle = 0.0f;
-    filtered_angle = 0.98f * (filtered_angle + imu_data.gyro_x_dps * dt) + 0.02f * accel_angle;
-    
-    return filtered_angle;
+// Get performance metrics
+Platform::Status BalanceRobotApp::GetPerformanceMetrics(RobotTiming& timing) {
+    // Copy timing information to output
+    timing = robot_timing;
+    return Platform::Status::OK;
 }
 
-// Run PID controller to calculate motor output
-float BalanceRobotApp::RunPIDController(float current_angle) {
-    // Calculate error (how far from setpoint)
-    float error = status.target_angle - current_angle;
-    
-    // Calculate time delta in seconds
-    uint64_t current_time = timing_service->GetMicroseconds();
-    float dt = (current_time - last_control_time) / 1000000.0f;
-    if (dt <= 0.0f || dt > 0.1f) {
-        dt = 0.01f; // Default to 10ms if timing is problematic
-    }
-    
-    // Calculate proportional term
-    float p_term = config.pid_config.kp * error;
-    
-    // Calculate integral term
-    integral_sum += error * dt;
-    
-    // Apply integral limit to prevent windup
-    if (integral_sum > config.pid_config.integral_limit) {
-        integral_sum = config.pid_config.integral_limit;
-    } else if (integral_sum < -config.pid_config.integral_limit) {
-        integral_sum = -config.pid_config.integral_limit;
-    }
-    
-    float i_term = config.pid_config.ki * integral_sum;
-    
-    // Calculate derivative term (on error)
-    float derivative = (error - prev_error) / dt;
-    float d_term = config.pid_config.kd * derivative;
-    
-    // Save current error for next iteration
-    prev_error = error;
-    
-    // Calculate total output
-    float output = p_term + i_term + d_term;
-    
-    // Apply output limit
-    if (output > config.pid_config.output_limit) {
-        output = config.pid_config.output_limit;
-    } else if (output < -config.pid_config.output_limit) {
-        output = -config.pid_config.output_limit;
-    }
-    
-    // Update status with PID terms for debugging
-    status.p_term = p_term;
-    status.i_term = i_term;
-    status.d_term = d_term;
-    
-    return output;
-}
-
-// Set motor speeds based on PID output
-void BalanceRobotApp::SetMotorSpeeds(float pid_output) {
-    // Convert PID output to motor speed (normalized to -100 to 100 range)
-    float motor_speed = pid_output;
-    
-    // Update status
-    status.motor_speed = motor_speed;
-    
-    // Set motor speeds (both motors get the same speed for straight balancing)
-    // In practice, there might be slight mechanical differences requiring tuning
-    if (motor_speed > 0) {
-        // Forward direction
-        motor_left->SetSpeedAndDirection(static_cast<uint32_t>(fabs(motor_speed)), Drivers::Motor::Direction::Forward);
-        motor_right->SetSpeedAndDirection(static_cast<uint32_t>(fabs(motor_speed)), Drivers::Motor::Direction::Forward);
-    } else {
-        // Backward direction
-        motor_left->SetSpeedAndDirection(static_cast<uint32_t>(fabs(motor_speed)), Drivers::Motor::Direction::Reverse);
-        motor_right->SetSpeedAndDirection(static_cast<uint32_t>(fabs(motor_speed)), Drivers::Motor::Direction::Reverse);
-    }
-}
-
-// Check if robot has fallen over
-bool BalanceRobotApp::CheckFallDetection(float angle) {
-    // Consider the robot fallen if angle exceeds threshold (e.g., ±45 degrees)
-    const float FALL_THRESHOLD = 45.0f;
-    return (angle < -FALL_THRESHOLD || angle > FALL_THRESHOLD);
-}
-
-// Reset integral term and other state when restarting balance
-void BalanceRobotApp::ResetPIDState() {
-    integral_sum = 0.0f;
-    prev_error = 0.0f;
-    
-    // Reset PID terms in status
-    status.p_term = 0.0f;
-    status.i_term = 0.0f;
-    status.d_term = 0.0f;
-    status.pid_output = 0.0f;
-    
-    // Set target angle from configuration
-    status.target_angle = config.pid_config.setpoint;
-}
-
-// Debug output helper
-void BalanceRobotApp::DebugOutput(const BalanceRobotStatus& status) {
-    // In a real implementation, this would log to the debug interface
-    // For simplicity, we're not implementing actual debug output here
-
-    // Could toggle an LED at a specific rate to indicate activity
-    // Or send data via a serial interface if available
-}
-
-// IMU data callback handler
-void BalanceRobotApp::IMUDataReadyCallback(void* param) {
+// Motor fault callback
+void BalanceRobotApp::MotorFaultCallback(void* param) {
     BalanceRobotApp* app = static_cast<BalanceRobotApp*>(param);
-    if (app == nullptr) {
-        return;
+    if (!app) return;
+    
+    // Handle motor fault as emergency
+    app->current_emergency = EmergencyType::MotorOverheat;
+    app->HandleEmergencyCondition(app->current_emergency);
+    
+    // Trigger application callback if registered
+    if (app->callbacks.find(EVENT_ERROR_DETECTED) != app->callbacks.end() && 
+        app->callbacks[EVENT_ERROR_DETECTED].active) {
+        app->callbacks[EVENT_ERROR_DETECTED].callback(app->callbacks[EVENT_ERROR_DETECTED].param);
+    }
+}
+
+// Remote command callback
+void BalanceRobotApp::RemoteCommandCallback(void* param) {
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    BalanceRobotApp* app = static_cast<BalanceRobotApp*>(param);
+    if (!app) return;
+    
+    // Update control inputs from remote
+    app->status.steering_input = app->sbus_comm->GetSteeringCommand();
+    app->status.throttle_input = app->sbus_comm->GetThrottleCommand();
+    
+    // Check for emergency stop command from remote
+    if (app->sbus_comm->IsEmergencyStopActive()) {
+        app->EmergencyStop(true);
     }
     
-    // This is called when new IMU data is available
-    // We could trigger an immediate update here, but for consistency
-    // we'll stick to the regular control loop timing
+    // Trigger application callback if registered
+    if (app->callbacks.find(EVENT_REMOTE_COMMAND_RECEIVED) != app->callbacks.end() && 
+        app->callbacks[EVENT_REMOTE_COMMAND_RECEIVED].active) {
+        app->callbacks[EVENT_REMOTE_COMMAND_RECEIVED].callback(
+            app->callbacks[EVENT_REMOTE_COMMAND_RECEIVED].param
+        );
+    }
+        */
+}
+
+// Battery status callback
+void BalanceRobotApp::BatteryStatusCallback(void* param) {
+    /*//TODO::IMPLEMENT SBUS AND SYSTEM MONITORING
+    BalanceRobotApp* app = static_cast<BalanceRobotApp*>(param);
+    if (!app) return;
+    
+    // Check for low battery condition
+    float battery_voltage = app->system_monitor->GetBatteryVoltage();
+    app->status.battery_voltage = battery_voltage;
+    app->status.battery_percentage = app->system_monitor->GetBatteryPercentage();
+    
+    if (app->status.battery_percentage < 10 && !app->status.emergency_stop_active &&
+        app->current_emergency == EmergencyType::None) {
+        app->current_emergency = EmergencyType::BatteryLow;
+        app->HandleEmergencyCondition(app->current_emergency);
+    }
+    
+    // Trigger application callback if registered
+    if (app->callbacks.find(EVENT_BATTERY_LOW) != app->callbacks.end() && 
+        app->callbacks[EVENT_BATTERY_LOW].active) {
+        app->callbacks[EVENT_BATTERY_LOW].callback(app->callbacks[EVENT_BATTERY_LOW].param);
+    }
+        */
 }
 
 } // namespace APP

@@ -8,9 +8,13 @@ namespace Platform {
         constexpr uint32_t FLASH_BASE = 0x40023C00UL;
         constexpr uint32_t FLASH_ACR_OFFSET = 0x00UL;
         constexpr uint32_t FLASH_ACR = (FLASH_BASE + FLASH_ACR_OFFSET);
-        
+        constexpr uintptr_t FLASH_SIZE_REG_ADDR = 0x1FFF7A22;
+        inline const uint16_t* FLASH_SIZE_REG = reinterpret_cast<const uint16_t*>(FLASH_SIZE_REG_ADDR);
+    
+        inline uint32_t GetFlashEndAddress() {
+            return 0x08000000 + (*FLASH_SIZE_REG * 1024);
+        }
         constexpr uint32_t FLASH_BASE_ADDRESS = 0x08000000;
-        constexpr uint32_t FLASH_END_ADDRESS = 0x08080000;
         constexpr uint8_t  FLASH_SECTOR_COUNT = 8;
         constexpr uint8_t  INVALID_SECTOR = 0xFF;
 

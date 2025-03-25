@@ -19,6 +19,8 @@ namespace Platform {
 #define __O  volatile       // Write-only
 #define __IO volatile       // Read-write
 
+constexpr float PI	= 3.14159265358979323846;
+
 // Status codes
 enum class Status {
     OK = 0,              // Operation completed successfully

@@ -53,6 +53,21 @@ namespace MPU6050Reg {
     constexpr uint8_t FIFO_COUNTL      = 0x73;  // FIFO count low byte
     constexpr uint8_t FIFO_R_W         = 0x74;  // FIFO read/write
     constexpr uint8_t WHO_AM_I         = 0x75;  // Device ID (should be 0x68)
+    // Accelerometer offset registers
+    constexpr uint8_t XA_OFFS_H = 0x06;
+    constexpr uint8_t XA_OFFS_L = 0x07;
+    constexpr uint8_t YA_OFFS_H = 0x08;
+    constexpr uint8_t YA_OFFS_L = 0x09;
+    constexpr uint8_t ZA_OFFS_H = 0x0A;
+    constexpr uint8_t ZA_OFFS_L = 0x0B;
+
+    // Gyroscope offset registers
+    constexpr uint8_t XG_OFFS_USRH = 0x13;
+    constexpr uint8_t XG_OFFS_USRL = 0x14;
+    constexpr uint8_t YG_OFFS_USRH = 0x15;
+    constexpr uint8_t YG_OFFS_USRL = 0x16;
+    constexpr uint8_t ZG_OFFS_USRH = 0x17;
+    constexpr uint8_t ZG_OFFS_USRL = 0x18;
 }
 
 enum MPU6050Event {
@@ -85,6 +100,12 @@ constexpr uint32_t MPU6050_CTRL_ENABLE_TEMP_SENSOR = 0x2012;
 constexpr uint32_t MPU6050_CTRL_DISABLE_TEMP_SENSOR = 0x2013;
 constexpr uint32_t MPU6050_CTRL_CALIBRATE_GYRO = 0x2014;
 constexpr uint32_t MPU6050_CTRL_CALIBRATE_ACCEL = 0x2015;
+constexpr uint32_t MPU6050_CTRL_SET_GYRO_OFFSETS = 0x2016;
+constexpr uint32_t MPU6050_CTRL_GET_GYRO_OFFSETS = 0x2017;
+constexpr uint32_t MPU6050_CTRL_SET_ACCEL_OFFSETS = 0x2018;
+constexpr uint32_t MPU6050_CTRL_GET_ACCEL_OFFSETS = 0x2019;
+constexpr uint32_t MPU6050_CTRL_RESET_OFFSETS = 0x201A;
+constexpr uint32_t MPU6050_CTRL_CALIBRATE_ITERATIVE = 0x201B;
 
 typedef enum {
     MPU6050_MODE_MANUAL,   // Application triggers readings explicitly
@@ -94,7 +115,7 @@ typedef enum {
  * MPU6050 Configuration Structure
  */
 struct MPU6050Config {
-    Platform::I2C::I2CInstance i2c_instance;
+    Platform::I2C::I2CConfig i2c_config;
     uint8_t device_address;   // I2C device address (default is 0x68, or 0x69 if AD0 pin is high)
     uint8_t gyro_range;       // Gyroscope range (0=±250°/s, 1=±500°/s, 2=±1000°/s, 3=±2000°/s)
     uint8_t accel_range;      // Accelerometer range (0=±2g, 1=±4g, 2=±8g, 3=±16g)
@@ -134,6 +155,8 @@ struct MPU6050Data {
     float gyro_y_dps;         // Gyroscope Y-axis in degrees per second
     float gyro_z_dps;         // Gyroscope Z-axis in degrees per second
     
+    float filtered_angle;
+
     uint64_t timestamp_ms;    // Timestamp in milliseconds
 };
 
@@ -215,7 +238,7 @@ private:
     Platform::Status SetClockSource(uint8_t source);
     Platform::Status ResetDevice();
     Platform::Status VerifyDeviceID();
-    
+    Platform::Status CalibrateIterative();
     // Operating mode and state tracking
     MPU6050_OperatingMode current_mode;
     bool data_ready_pending;    // Flag for manual mode to indicate data is ready
@@ -293,6 +316,37 @@ public:
 
     Platform::Status RegisterCallback(uint32_t event, std::function<void()> callback) override;
 
+    void GetProcessedData(MPU6050Data* data);
+
+    // Gyroscope offset functions
+    Platform::Status SetGyroXOffset(int16_t offset);
+    Platform::Status SetGyroYOffset(int16_t offset);
+    Platform::Status SetGyroZOffset(int16_t offset);
+    Platform::Status SetGyroOffsets(int16_t x_offset, int16_t y_offset, int16_t z_offset);
+
+    Platform::Status GetGyroXOffset(int16_t* offset);
+    Platform::Status GetGyroYOffset(int16_t* offset);
+    Platform::Status GetGyroZOffset(int16_t* offset);
+    Platform::Status GetGyroOffsets(int16_t* x_offset, int16_t* y_offset, int16_t* z_offset);
+
+    // Accelerometer offset functions
+    Platform::Status SetAccelXOffset(int16_t offset);
+    Platform::Status SetAccelYOffset(int16_t offset);
+    Platform::Status SetAccelZOffset(int16_t offset);
+    Platform::Status SetAccelOffsets(int16_t x_offset, int16_t y_offset, int16_t z_offset);
+
+    Platform::Status GetAccelXOffset(int16_t* offset);
+    Platform::Status GetAccelYOffset(int16_t* offset);
+    Platform::Status GetAccelZOffset(int16_t* offset);
+    Platform::Status GetAccelOffsets(int16_t* x_offset, int16_t* y_offset, int16_t* z_offset);
+
+    // Combined function for setting all offsets at once
+    Platform::Status SetAllOffsets(
+        int16_t accel_x_offset, int16_t accel_y_offset, int16_t accel_z_offset,
+        int16_t gyro_x_offset, int16_t gyro_y_offset, int16_t gyro_z_offset);
+
+    // Helper for factory reset of offset registers
+    Platform::Status ResetOffsets();
     bool IsDataReady();
     
     // Method to change operating mode at runtime
@@ -302,6 +356,8 @@ public:
     void HandleDataReadyInterrupt();
     static void I2CTransferCompleteHandler(void* param);
     void HandleI2CTransferComplete();
+    
+    MPU6050Data ProcessIMURawData();
 
     void TriggerCallback(MPU6050Event event);
     /**

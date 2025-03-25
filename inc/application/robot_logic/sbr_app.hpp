@@ -1,186 +1,227 @@
-﻿// inc/application/robot_logic/balance_app.hpp
-
+﻿// sbr_app.hpp
 #pragma once
 
-#include "application/app_module.hpp"
-#include "hardware_abstraction/gpio.hpp"
-#include "hardware_abstraction/i2c.hpp"
-#include "hardware_abstraction/pwm.hpp"
-#include "middleware/system_services/system_timing.hpp"
+#include "common/platform.hpp"
+#include "app_module.hpp"
+#include "balance_controller.hpp"
 #include "drivers/sensors/mpu6050.hpp"
 #include "drivers/actuators/vnh5019.hpp"
+#include "middleware/system_services/system_timing.hpp"
+#include "sbr_app_types.hpp"
+#include "sbr_app_events.hpp"
+#include "sbr_app_tasks.hpp"
+
 #include <memory>
-#include <array>
-#include <unordered_map>
+#include <map>
 
 namespace APP {
 
-// PID controller configuration
-struct PIDConfig {
-    float kp;            // Proportional gain
-    float ki;            // Integral gain
-    float kd;            // Derivative gain
-    float setpoint;      // Desired angle (usually 0 for upright position)
-    float output_limit;  // Limit the output range (-output_limit to +output_limit)
-    float integral_limit; // Limit the integral term to prevent windup
-};
-
-// Define application events
-static constexpr uint32_t EVENT_BALANCE_UPDATE = 0x1;
-static constexpr uint32_t EVENT_FALL_DETECTED = 0x2;
-static constexpr uint32_t EVENT_IMU_ERROR = 0x3;
-static constexpr uint32_t EVENT_MOTOR_ERROR = 0x4;
-
-
-constexpr uint32_t M_PI = 3.14159265358979323846;
-
-// Configuration structure for self-balancing robot
-struct BalanceRobotConfig {
-    // MPU6050 configuration
-    Drivers::Sensors::MPU6050Config imu_config;
-    
-    // Motor driver configuration
-    Drivers::Motor::VNH5019Config motor_left_config;
-    Drivers::Motor::VNH5019Config motor_right_config;
-    
-    // PID configuration
-    PIDConfig pid_config;
-
-    // Timing configuration
-    uint32_t control_loop_interval_ms;  // Control loop interval in milliseconds
-    
-    // Debug settings
-    bool enable_debug_output;           // Enable debug messages (via LED or serial)
-};
-
-// Status information for the self-balancing robot
-struct BalanceRobotStatus {
-    float current_angle;            // Current measured angle
-    float target_angle;             // Target angle (setpoint)
-    float motor_speed;              // Current motor speed
-    float pid_output;               // Current PID controller output
-    float p_term;                   // Proportional term
-    float i_term;                   // Integral term
-    float d_term;                   // Derivative term
-    uint32_t loop_time_us;          // Execution time of the control loop
-    bool is_balanced;               // Whether the robot is balanced
-    bool motor_enabled;             // Whether the motors are enabled
-};
-
-// Self-balancing robot application class
+/**
+ * Self-balancing robot application class
+ * Manages the application lifecycle, state, and components
+ */
 class BalanceRobotApp : public ApplicationModule {
-private:
-    // Configuration
-    BalanceRobotConfig config;
-    
-    // State tracking
-    AppState current_state;
-    BalanceRobotStatus status;
-    
-    // Previous error for derivative calculation
-    float prev_error;
-    
-    // Running sum for integral calculation
-    float integral_sum;
-    
-    // Last control loop time for dt calculation
-    uint64_t last_control_time;
-    
-    // Hardware interfaces
-    Drivers::Sensors::MPU6050* imu;
-    Drivers::Motor::VNH5019Driver* motor_left;
-    Drivers::Motor::VNH5019Driver* motor_right;
-    Middleware::SystemServices::SystemTiming* timing_service;
-    
-    // Callback storage
-    struct CallbackEntry {
-        void (*callback)(void* param);
-        void* param;
-        bool active;
-    };
-    
-
-    std::unordered_map<uint32_t, CallbackEntry> callbacks;
-    
-    // Private methods
-    
-    // Read sensor data and compute the current angle
-    float ReadAngle();
-    
-    // Run PID controller to calculate motor output
-    float RunPIDController(float current_angle);
-    
-    // Set motor speeds based on PID output
-    void SetMotorSpeeds(float pid_output);
-    
-    // Check if robot has fallen over
-    bool CheckFallDetection(float angle);
-    
-    // Reset integral term and other state when restarting balance
-    void ResetPIDState();
-    
-    // Debug output helper
-    void DebugOutput(const BalanceRobotStatus& status);
-    
-    // IMU data callback handler
-    static void IMUDataReadyCallback(void* param);
-    
 public:
-    // Constructor
-    BalanceRobotApp();
-    
-    // Destructor
-    ~BalanceRobotApp() override;
-    
     // Singleton accessor
     static BalanceRobotApp& GetInstance();
     
-    // ApplicationModule interface implementation
+    //============= ApplicationModule Interface Implementation =============//
     
     // Get current application state
     AppState GetState() const override;
     
-    // Initialize the self-balancing robot
+    // Initialize the application module
     Platform::Status Init(void* config) override;
     
-    // Start balancing operation
+    // Start the module operation
     Platform::Status Start() override;
     
-    // Stop balancing operation
+    // Stop the module operation
     Platform::Status Stop() override;
     
-    // Process function - called periodically to update state
+    // Main processing function
     Platform::Status Process(void* params) override;
     
-    // Handle application commands
+    // Handle a command
     Platform::Status HandleCommand(uint32_t cmd_id, void* params) override;
     
-    // Get application status
+    // Get module status
     Platform::Status GetStatus(void* status, uint32_t* size) override;
     
     // Register callback for application events
     Platform::Status RegisterCallback(uint32_t event, void (*callback)(void* param), void* param) override;
     
-    // Application-specific methods
+    //================= Task Management Functions =================//
     
-    // Update PID parameters
-    Platform::Status UpdatePIDParameters(const PIDConfig& pid_params);
+    // Initialize FreeRTOS tasks
+    Platform::Status InitializeTasks();
     
-    // Calibrate the IMU sensor
-    Platform::Status CalibrateIMU();
+    // Start tasks
+    Platform::Status StartTasks();
+    
+    // Stop tasks
+    Platform::Status StopTasks();
+    
+    // Suspend balancing task
+    Platform::Status SuspendBalancingTask();
+    
+    // Resume balancing task
+    Platform::Status ResumeBalancingTask();
+
+    // Register a task to be notified
+    void RegisterBalancingTask(TaskHandle_t handle);
+    
+    //================= Public Utility Methods =================//
     
     // Set target angle (for adjusting balance point)
     Platform::Status SetTargetAngle(float angle);
     
-    // Toggle motor enable/disable
+    // Update PID parameters
+    Platform::Status SetPIDParameters(const PIDConfig& config);
+    
+    // Emergency stop
+    Platform::Status EmergencyStop(bool user_triggered);
+    
+    // Recover from emergency
+    Platform::Status RecoverFromEmergency();
+    
+    // Enable/disable motors
     Platform::Status EnableMotors(bool enable);
-};
+    
+    // Get performance metrics
+    Platform::Status GetPerformanceMetrics(RobotTiming& timing);
+    
+    // Calibrate IMU
+    Platform::Status CalibrateIMU();
+    
+    // Friend task functions so they can access private members
+    friend void vBalancingTask(void* params);
+    friend void vMonitoringTask(void* params);
+    friend void vCommunicationTask(void* params);
+    
+private:
+    // Private constructor for singleton
+    BalanceRobotApp();
+    ~BalanceRobotApp();
+    
+    // Prevent copying and assignment
+    BalanceRobotApp(const BalanceRobotApp&) = delete;
+    BalanceRobotApp& operator=(const BalanceRobotApp&) = delete;
+    
+    //================= Hardware Initialization =================//
+    
+    // Initialize hardware interfaces
+    Platform::Status InitializeHardware();
+    
+    // Initialize components
+    Platform::Status InitializeComponents();
+    
+    //================= Process Functions =================//
+    
+    // Process balancing functionality
+    Platform::Status ProcessBalancing(void* params = nullptr);
+    
+    // Process communication functionality
+    Platform::Status ProcessCommunication(void* params = nullptr);
+    
+    // Process monitoring functionality
+    Platform::Status ProcessMonitoring(void* params = nullptr);
+    
+    // Process error logging functionality
+    Platform::Status ProcessErrorLogging(void* params = nullptr);
+    
+    //================= Utility Functions =================//
+    
+    // Handle emergency condition
+    Platform::Status HandleEmergencyCondition(EmergencyType emergency);
+    
+    // Start timing measurement
+    void StartTiming(ComponentTiming& timing);
+    
+    // End timing measurement and update statistics
+    void EndTiming(ComponentTiming& timing);
+    
+    
+    void EndProcessTiming(ProcessType process_type);
 
-// Command IDs specific to balance robot application
-constexpr uint32_t BALANCE_ROBOT_CMD_UPDATE_PID = 0x5001;
-constexpr uint32_t BALANCE_ROBOT_CMD_CALIBRATE_IMU = 0x5002;
-constexpr uint32_t BALANCE_ROBOT_CMD_SET_TARGET_ANGLE = 0x5003;
-constexpr uint32_t BALANCE_ROBOT_CMD_ENABLE_MOTORS = 0x5004;
-constexpr uint32_t BALANCE_ROBOT_CMD_GET_BALANCE_STATUS = 0x5005;
+    //================= Static Callbacks =================//
+    
+    // IMU data ready callback
+    static void IMUDataReadyCallback(void* param);
+    
+    // IMU data available callback
+    static void IMUDataAvailableCallback(void* param);
+    
+    // Motor fault callback
+    static void MotorFaultCallback(void* param);
+    
+    // Remote command callback
+    static void RemoteCommandCallback(void* param);
+    
+    // Battery status callback
+    static void BatteryStatusCallback(void* param);
+    
+    //================= State Variables =================//
+    
+    // Static instance pointer for singleton
+    static BalanceRobotApp* instance;
+    
+    // Current application state
+    AppState current_state;
+    
+    // Balance robot configuration
+    BalanceRobotConfig RobotConfig;
+    
+    // Current status
+    RobotAppStatus status;
+    
+    // Timing information
+    RobotTiming robot_timing;
+    
+    // Current emergency type
+    EmergencyType current_emergency;
+    
+    // Fall detection threshold
+    float fall_detection_threshold;
+    
+    //================= Hardware Interfaces =================//
+    
+    // IMU interface
+    Drivers::Sensors::MPU6050* imu;
+    
+    // Motor interfaces
+    Drivers::Motor::VNH5019Driver* motor_left;
+    Drivers::Motor::VNH5019Driver* motor_right;
+    
+    // Timing service
+    Middleware::SystemServices::SystemTiming* timing_service;
+    
+    //================= Components =================//
+    
+    // Balance controller component
+    std::unique_ptr<BalanceController> balance_controller;
+    
+    // TODO: Future components
+    //std::unique_ptr<SBUSCommunicator> sbus_comm;
+    //std::unique_ptr<SystemMonitor> system_monitor;
+    //std::unique_ptr<ErrorLogger> error_logger;
+    
+    //================= Task Handles and Configuration =================//
+    
+    // Task handles
+    TaskHandle_t xBalancingTaskHandle;
+    TaskHandle_t xMonitoringTaskHandle;
+    TaskHandle_t xCommunicationTaskHandle;
+    
+    // Task configurations
+    TaskConfig balancing_task_config;
+    TaskConfig monitoring_task_config;
+    TaskConfig communication_task_config;
+    
+    //================= Callback Registry =================//
+    
+    // Map of registered callbacks
+    std::map<uint32_t, CallbackEntry> callbacks;
+};
 
 } // namespace APP

@@ -8,7 +8,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-
+#include <cmath>
+#include "platform.hpp"
 namespace Drivers {
 namespace Sensors {
 
@@ -101,19 +102,31 @@ namespace Sensors {
         sensor_data.gyro_x = (static_cast<int16_t>(sensor_buffer[8]) << 8) | sensor_buffer[9];
         sensor_data.gyro_y = (static_cast<int16_t>(sensor_buffer[10]) << 8) | sensor_buffer[11];
         sensor_data.gyro_z = (static_cast<int16_t>(sensor_buffer[12]) << 8) | sensor_buffer[13];
-        
-        // Apply calibration offsets
-        sensor_data.accel_x -= calibration.accel_x_offset;
-        sensor_data.accel_y -= calibration.accel_y_offset;
-        sensor_data.accel_z -= calibration.accel_z_offset;
-        sensor_data.gyro_x -= calibration.gyro_x_offset;
-        sensor_data.gyro_y -= calibration.gyro_y_offset;
-        sensor_data.gyro_z -= calibration.gyro_z_offset;
-        
+    
         // Convert to physical units
         ConvertRawData();
     }
     
+    MPU6050Data MPU6050::ProcessIMURawData() {
+        // Calculate the filtered angle using your complementary filter logic
+        float accel_angle = atan2f(sensor_data.accel_x_g, 
+                              sqrtf(sensor_data.accel_y_g * sensor_data.accel_y_g + 
+                                    sensor_data.accel_z_g * sensor_data.accel_z_g)) * 180.0f / Platform::PI;
+        
+        
+        // Timestamp might need adjustment for proper timing
+        uint64_t now = timing_service->GetMicroseconds();
+        static uint64_t last_time = now;
+        float dt = (now - last_time) / 1000000.0f;
+        last_time = now;
+        
+        if (sensor_data.timestamp_ms == 0) {
+            sensor_data.filtered_angle = accel_angle;
+        } else {
+            sensor_data.filtered_angle = 0.98f * (sensor_data.filtered_angle + sensor_data.gyro_x_dps * dt) + 0.02f * accel_angle;
+        } 
+        return sensor_data;
+    }
     /**
      * Set gyroscope full-scale range
      * 
@@ -420,7 +433,7 @@ namespace Sensors {
         }
 
         Platform::Status status;
-        this->i2c_interface = &Platform::I2C::I2CInterface::GetInstance(config.i2c_instance);
+        this->i2c_interface = &Platform::I2C::I2CInterface::GetInstance(config.i2c_config.i2c_instance);
         // Check if we have a valid I2C interface
         if (!this->i2c_interface) {
             state = DeviceState::Error;
@@ -453,8 +466,11 @@ namespace Sensors {
             gpio.RegisterInterruptCallback(config.data_ready_port, config.data_ready_pin,
                                         &DataReadyInterruptHandler, this);
             
-            // Enable the interrupt
-            gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, true);
+            // Disable on startup
+            gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, false);
+            
+            // save sensor data acquisition mode (Manual or Auto)
+            this->current_mode = config.operating_mode;
         }
         // Reset device to ensure clean state
         status = ResetDevice();
@@ -661,7 +677,7 @@ namespace Sensors {
      * Read sensor data from MPU6050
      * 
      * @param data Buffer to store read data
-     * @param size Size of data to read (must be sizeof(MPU6050Data))
+     * @param size Size of data to read (must be sizeof(MPU6050Data)) (blocking)
      * @return Status code indicating success or failure
      */
     Platform::Status MPU6050::ReadData(void* data, uint32_t size) {
@@ -691,13 +707,11 @@ namespace Sensors {
         if (status != Platform::Status::OK) {
             return status;
         }
-        
-        // Process the data
+    
         ParseSensorData();
-        
-        // Copy data to output buffer
+
         *static_cast<MPU6050Data*>(data) = sensor_data;
-        
+
         return Platform::Status::OK;
     }
     
@@ -708,7 +722,7 @@ namespace Sensors {
      */
     Platform::Status MPU6050::ReadDataAsync() {
         // Check if initialized
-        if (state != DeviceState::Running) {
+        if (state != DeviceState::Initialized) {
             return Platform::Status::NOT_INITIALIZED;
         }
         
@@ -738,6 +752,12 @@ namespace Sensors {
         return Platform::Status::OK;
     }
     
+    void MPU6050::GetProcessedData(MPU6050Data* data){
+    
+            // Process the data (filter angles, etc.)
+            *data = ProcessIMURawData();
+            
+        }
     /**
      * Write data to MPU6050 (not typically used except for configuration)
      * 
@@ -899,6 +919,16 @@ namespace Sensors {
                 }
                 
                 config.interrupt_enabled = true;
+
+                if(config.enable_data_ready_interrupt){
+                    
+                    Platform::GPIO::GpioInterface& gpio = Platform::GPIO::GpioInterface::GetInstance();
+
+                    status = gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, false);
+                    if (status != Platform::Status::OK) {
+                        return status;
+                    }
+                }
                 return Platform::Status::OK;
             }
                 
@@ -908,7 +938,15 @@ namespace Sensors {
                 if (status != Platform::Status::OK) {
                     return status;
                 }
-                
+                if(config.enable_data_ready_interrupt){
+                    this->config.enable_data_ready_interrupt = false;
+                    Platform::GPIO::GpioInterface& gpio = Platform::GPIO::GpioInterface::GetInstance();
+
+                    status = gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, false);
+                    if (status != Platform::Status::OK) {
+                        return status;
+                    }
+                }
                 config.interrupt_enabled = false;
                 return Platform::Status::OK;
             }
@@ -1166,7 +1204,42 @@ namespace Sensors {
                 
                 return Platform::Status::OK;
             }
+
+            case MPU6050_CTRL_SET_GYRO_OFFSETS: {
+                if (!arg) return Platform::Status::INVALID_PARAM;
                 
+                int16_t* offsets = static_cast<int16_t*>(arg);
+                return SetGyroOffsets(offsets[0], offsets[1], offsets[2]);
+            }
+
+            case MPU6050_CTRL_GET_GYRO_OFFSETS: {
+                if (!arg) return Platform::Status::INVALID_PARAM;
+                
+                int16_t* offsets = static_cast<int16_t*>(arg);
+                return GetGyroOffsets(&offsets[0], &offsets[1], &offsets[2]);
+            }
+
+            case MPU6050_CTRL_SET_ACCEL_OFFSETS: {
+                if (!arg) return Platform::Status::INVALID_PARAM;
+                
+                int16_t* offsets = static_cast<int16_t*>(arg);
+                return SetAccelOffsets(offsets[0], offsets[1], offsets[2]);
+            }
+
+            case MPU6050_CTRL_GET_ACCEL_OFFSETS: {
+                if (!arg) return Platform::Status::INVALID_PARAM;
+                
+                int16_t* offsets = static_cast<int16_t*>(arg);
+                return GetAccelOffsets(&offsets[0], &offsets[1], &offsets[2]);
+            }
+
+            case MPU6050_CTRL_RESET_OFFSETS: {
+                return ResetOffsets();
+            }  
+            
+            case MPU6050_CTRL_CALIBRATE_ITERATIVE: {
+                return CalibrateIterative();
+            }
             default:
                 // Try the base class implementation for common commands
                 return Platform::Status::INVALID_PARAM;
@@ -1234,18 +1307,21 @@ namespace Sensors {
             instance->HandleI2CTransferComplete();
         }
     }
+    
+    Platform::Status MPU6050::SetOperatingMode(MPU6050_OperatingMode mode) {
+        current_mode = mode;
+        return Platform::Status::OK;
+    }   
+    
     void MPU6050::HandleI2CTransferComplete() {
         // Process the raw data
         ParseSensorData();
 
+        ProcessIMURawData();
+        
         // Notify application about data availability
-        TriggerCallback(MPU6050Event::MPU6050_EVENT_DATA_READY);
+        TriggerCallback(MPU6050Event::MPU6050_EVENT_DATA_AVAILABLE);
 
-    }
-
-    Platform::Status MPU6050::SetOperatingMode(MPU6050_OperatingMode mode) {
-        current_mode = mode;
-        return Platform::Status::OK;
     }
 
     bool MPU6050::IsDataReady() {
@@ -1258,6 +1334,558 @@ namespace Sensors {
         
         // Otherwise return the flag set by the interrupt handler
         return data_ready_pending;
+    }
+
+    // Gyroscope offset functions
+    Platform::Status MPU6050::SetGyroXOffset(int16_t offset) {
+        // Write high byte
+        Platform::Status status = WriteRegister(MPU6050Reg::XG_OFFS_USRH, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Write low byte
+        status = WriteRegister(MPU6050Reg::XG_OFFS_USRL, static_cast<uint8_t>(offset & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Update calibration data
+        calibration.gyro_x_offset = offset;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::SetGyroYOffset(int16_t offset) {
+        // Write high byte
+        Platform::Status status = WriteRegister(MPU6050Reg::YG_OFFS_USRH, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Write low byte
+        status = WriteRegister(MPU6050Reg::YG_OFFS_USRL, static_cast<uint8_t>(offset & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Update calibration data
+        calibration.gyro_y_offset = offset;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::SetGyroZOffset(int16_t offset) {
+        // Write high byte
+        Platform::Status status = WriteRegister(MPU6050Reg::ZG_OFFS_USRH, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Write low byte
+        status = WriteRegister(MPU6050Reg::ZG_OFFS_USRL, static_cast<uint8_t>(offset & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Update calibration data
+        calibration.gyro_z_offset = offset;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::SetGyroOffsets(int16_t x_offset, int16_t y_offset, int16_t z_offset) {
+        Platform::Status status;
+        
+        status = SetGyroXOffset(x_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = SetGyroYOffset(y_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = SetGyroZOffset(z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetGyroXOffset(int16_t* offset) {
+        if (offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        uint8_t high_byte, low_byte;
+        
+        // Read high byte
+        Platform::Status status = ReadRegister(MPU6050Reg::XG_OFFS_USRH, &high_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Read low byte
+        status = ReadRegister(MPU6050Reg::XG_OFFS_USRL, &low_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Combine bytes into 16-bit value
+        *offset = (static_cast<int16_t>(high_byte) << 8) | low_byte;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetGyroYOffset(int16_t* offset) {
+        if (offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        uint8_t high_byte, low_byte;
+        
+        // Read high byte
+        Platform::Status status = ReadRegister(MPU6050Reg::YG_OFFS_USRH, &high_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Read low byte
+        status = ReadRegister(MPU6050Reg::YG_OFFS_USRL, &low_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Combine bytes into 16-bit value
+        *offset = (static_cast<int16_t>(high_byte) << 8) | low_byte;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetGyroZOffset(int16_t* offset) {
+        if (offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        uint8_t high_byte, low_byte;
+        
+        // Read high byte
+        Platform::Status status = ReadRegister(MPU6050Reg::ZG_OFFS_USRH, &high_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Read low byte
+        status = ReadRegister(MPU6050Reg::ZG_OFFS_USRL, &low_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Combine bytes into 16-bit value
+        *offset = (static_cast<int16_t>(high_byte) << 8) | low_byte;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetGyroOffsets(int16_t* x_offset, int16_t* y_offset, int16_t* z_offset) {
+        if (x_offset == nullptr || y_offset == nullptr || z_offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        Platform::Status status;
+        
+        status = GetGyroXOffset(x_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = GetGyroYOffset(y_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = GetGyroZOffset(z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        return Platform::Status::OK;
+    }
+
+    // Accelerometer offset functions
+
+    Platform::Status MPU6050::SetAccelXOffset(int16_t offset) {
+        // For accelerometer, bit 0 of the low byte must be 0 (reserved)
+        offset &= 0xFFFE;
+        
+        // Write high byte
+        Platform::Status status = WriteRegister(MPU6050Reg::XA_OFFS_H, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Write low byte
+        status = WriteRegister(MPU6050Reg::XA_OFFS_L, static_cast<uint8_t>(offset & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Update calibration data
+        calibration.accel_x_offset = offset;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::SetAccelYOffset(int16_t offset) {
+        // For accelerometer, bit 0 of the low byte must be 0 (reserved)
+        offset &= 0xFFFE;
+        
+        // Write high byte
+        Platform::Status status = WriteRegister(MPU6050Reg::YA_OFFS_H, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Write low byte
+        status = WriteRegister(MPU6050Reg::YA_OFFS_L, static_cast<uint8_t>(offset & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Update calibration data
+        calibration.accel_y_offset = offset;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::SetAccelZOffset(int16_t offset) {
+        // For accelerometer, bit 0 of the low byte must be 0 (reserved)
+        offset &= 0xFFFE;
+        
+        // Write high byte
+        Platform::Status status = WriteRegister(MPU6050Reg::ZA_OFFS_H, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Write low byte
+        status = WriteRegister(MPU6050Reg::ZA_OFFS_L, static_cast<uint8_t>(offset & 0xFF));
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Update calibration data
+        calibration.accel_z_offset = offset;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::SetAccelOffsets(int16_t x_offset, int16_t y_offset, int16_t z_offset) {
+        Platform::Status status;
+        
+        status = SetAccelXOffset(x_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = SetAccelYOffset(y_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = SetAccelZOffset(z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetAccelXOffset(int16_t* offset) {
+        if (offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        uint8_t high_byte, low_byte;
+        
+        // Read high byte
+        Platform::Status status = ReadRegister(MPU6050Reg::XA_OFFS_H, &high_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Read low byte
+        status = ReadRegister(MPU6050Reg::XA_OFFS_L, &low_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Combine bytes into 16-bit value
+        *offset = (static_cast<int16_t>(high_byte) << 8) | low_byte;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetAccelYOffset(int16_t* offset) {
+        if (offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        uint8_t high_byte, low_byte;
+        
+        // Read high byte
+        Platform::Status status = ReadRegister(MPU6050Reg::YA_OFFS_H, &high_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Read low byte
+        status = ReadRegister(MPU6050Reg::YA_OFFS_L, &low_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Combine bytes into 16-bit value
+        *offset = (static_cast<int16_t>(high_byte) << 8) | low_byte;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetAccelZOffset(int16_t* offset) {
+        if (offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        uint8_t high_byte, low_byte;
+        
+        // Read high byte
+        Platform::Status status = ReadRegister(MPU6050Reg::ZA_OFFS_H, &high_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Read low byte
+        status = ReadRegister(MPU6050Reg::ZA_OFFS_L, &low_byte);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Combine bytes into 16-bit value
+        *offset = (static_cast<int16_t>(high_byte) << 8) | low_byte;
+        
+        return Platform::Status::OK;
+    }
+
+    Platform::Status MPU6050::GetAccelOffsets(int16_t* x_offset, int16_t* y_offset, int16_t* z_offset) {
+        if (x_offset == nullptr || y_offset == nullptr || z_offset == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        Platform::Status status;
+        
+        status = GetAccelXOffset(x_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = GetAccelYOffset(y_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        status = GetAccelZOffset(z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        return Platform::Status::OK;
+    }
+
+    // Combined function for setting all offsets at once
+    Platform::Status MPU6050::SetAllOffsets(
+        int16_t accel_x_offset, int16_t accel_y_offset, int16_t accel_z_offset,
+        int16_t gyro_x_offset, int16_t gyro_y_offset, int16_t gyro_z_offset) {
+        
+        Platform::Status status;
+        
+        // Set accelerometer offsets
+        status = SetAccelOffsets(accel_x_offset, accel_y_offset, accel_z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Set gyroscope offsets
+        status = SetGyroOffsets(gyro_x_offset, gyro_y_offset, gyro_z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        return Platform::Status::OK;
+    }
+
+    // Factory reset for all offset registers
+    Platform::Status MPU6050::ResetOffsets() {
+        return SetAllOffsets(0, 0, 0, 0, 0, 0);
+    }
+    /**
+     * Performs iterative calibration of the MPU6050
+     * This calibration uses the hardware offset registers for best results
+     * 
+     * @return Status code indicating success or failure
+     */
+    Platform::Status MPU6050::CalibrateIterative() {
+        // Check if initialized
+        if (state != DeviceState::Initialized) {
+            return Platform::Status::NOT_INITIALIZED;
+        }
+        
+        // Parameters for calibration
+        const int acc_deadzone = 8;     // Acceptable accelerometer error
+        const int gyro_deadzone = 1;    // Acceptable gyroscope error
+        const int max_iterations = 30;  // Maximum iterations to prevent infinite loops
+        
+        // Initial offsets (start with zeros or current values)
+        int16_t ax_offset = 0, ay_offset = 0, az_offset = 0;
+        int16_t gx_offset = 0, gy_offset = 0, gz_offset = 0;
+        
+        // Reset current offsets first
+        Platform::Status status = ResetOffsets();
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Allow sensor to stabilize after offset reset
+        timing_service->DelayMilliseconds(100);
+        
+        // Buffers for sensor readings
+        int16_t ax, ay, az, gx, gy, gz;
+        long mean_ax = 0, mean_ay = 0, mean_az = 0;
+        long mean_gx = 0, mean_gy = 0, mean_gz = 0;
+        
+        // Iterative calibration loop
+        for (int iteration = 0; iteration < max_iterations; iteration++) {
+            // Apply current offsets
+            status = SetAllOffsets(
+                ax_offset, ay_offset, az_offset,
+                gx_offset, gy_offset, gz_offset
+            );
+            
+            if (status != Platform::Status::OK) {
+                return status;
+            }
+            
+            // Allow time for offsets to take effect
+            timing_service->DelayMilliseconds(100);
+            
+            // Take multiple readings and average
+            const int num_samples = 100;
+            mean_ax = 0; mean_ay = 0; mean_az = 0;
+            mean_gx = 0; mean_gy = 0; mean_gz = 0;
+            
+            for (int i = 0; i < num_samples; i++) {
+                // Read raw values directly
+                std::array<uint8_t, 14> buffer;
+                status = ReadRegisters(MPU6050Reg::ACCEL_XOUT_H, buffer.data(), buffer.size(), config.i2c_timeout_ms);
+                if (status != Platform::Status::OK) {
+                    return status;
+                }
+                
+                // Parse values
+                ax = (buffer[0] << 8) | buffer[1];
+                ay = (buffer[2] << 8) | buffer[3];
+                az = (buffer[4] << 8) | buffer[5];
+                gx = (buffer[8] << 8) | buffer[9];
+                gy = (buffer[10] << 8) | buffer[11];
+                gz = (buffer[12] << 8) | buffer[13];
+                
+                mean_ax += ax;
+                mean_ay += ay;
+                mean_az += az;
+                mean_gx += gx;
+                mean_gy += gy;
+                mean_gz += gz;
+                
+                // Small delay between readings
+                timing_service->DelayMilliseconds(2);
+            }
+            
+            // Calculate means
+            mean_ax /= num_samples;
+            mean_ay /= num_samples;
+            mean_az /= num_samples;
+            mean_gx /= num_samples;
+            mean_gy /= num_samples;
+            mean_gz /= num_samples;
+            
+            // Check if we're within acceptable limits
+            bool ready = true;
+            
+            // Accel X
+            if (abs(mean_ax) > acc_deadzone) {
+                ax_offset = ax_offset - mean_ax / 8;  // Adjust offset by 1/8th of the error
+                ready = false;
+            }
+            
+            // Accel Y
+            if (abs(mean_ay) > acc_deadzone) {
+                ay_offset = ay_offset - mean_ay / 8;  // Adjust offset by 1/8th of the error
+                ready = false;
+            }
+            
+            // Accel Z (should read 1g = 16384 at rest)
+            int16_t target_z = 16384;  // 1g at default sensitivity
+            if (abs(target_z - mean_az) > acc_deadzone) {
+                az_offset = az_offset + (target_z - mean_az) / 8;  // Adjust offset by 1/8th of the error
+                ready = false;
+            }
+            
+            // Gyro X
+            if (abs(mean_gx) > gyro_deadzone) {
+                gx_offset = gx_offset - mean_gx / 4;  // Adjust offset by 1/4th of the error
+                ready = false;
+            }
+            
+            // Gyro Y
+            if (abs(mean_gy) > gyro_deadzone) {
+                gy_offset = gy_offset - mean_gy / 4;  // Adjust offset by 1/4th of the error
+                ready = false;
+            }
+            
+            // Gyro Z
+            if (abs(mean_gz) > gyro_deadzone) {
+                gz_offset = gz_offset - mean_gz / 4;  // Adjust offset by 1/4th of the error
+                ready = false;
+            }
+            
+            // If all measurements are within acceptable limits, we're done
+            if (ready) {
+                // Set final offsets one more time
+                status = SetAllOffsets(
+                    ax_offset, ay_offset, az_offset,
+                    gx_offset, gy_offset, gz_offset
+                );
+                
+                if (status != Platform::Status::OK) {
+                    return status;
+                }
+                
+                // Update internal calibration structure
+                calibration.accel_x_offset = ax_offset;
+                calibration.accel_y_offset = ay_offset;
+                calibration.accel_z_offset = az_offset;
+                calibration.gyro_x_offset = gx_offset;
+                calibration.gyro_y_offset = gy_offset;
+                calibration.gyro_z_offset = gz_offset;
+                
+                return Platform::Status::OK;
+            }
+        }
+        
+        // If we get here, we've exceeded max_iterations without achieving calibration
+        return Platform::Status::TIMEOUT;
     }
 }
 }
