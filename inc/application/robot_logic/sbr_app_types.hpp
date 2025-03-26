@@ -163,7 +163,6 @@ struct RobotAppStatus {
     float motor_speed;
     PIDConfig pid_output;
     Drivers::Sensors::MPU6050Data imu_data;
-    CalibrationData calibration;    // mpu6050 calibration struct
 };
 
 // Callback information

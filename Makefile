@@ -21,7 +21,7 @@ SIZE := arm-none-eabi-size
 MACH := cortex-m4
 
 # Optimization and debug flags
-OPT_FLAGS := -O0
+OPT_FLAGS := -Os
 DBG_FLAGS := -g3
 
 # Warning levels - separate from core compilation

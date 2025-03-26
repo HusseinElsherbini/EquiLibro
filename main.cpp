@@ -244,7 +244,6 @@ int main() {
         }
     }
     
-    
     // Get the balance robot application instance
     // The singleton is already initialized in InitBalanceRobotApp
     APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();

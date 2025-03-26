@@ -16,6 +16,7 @@
 
 namespace APP {
 
+
 /**
  * Self-balancing robot application class
  * Manages the application lifecycle, state, and components
@@ -209,9 +210,9 @@ private:
     //================= Task Handles and Configuration =================//
     
     // Task handles
-    TaskHandle_t xBalancingTaskHandle;
-    TaskHandle_t xMonitoringTaskHandle;
-    TaskHandle_t xCommunicationTaskHandle;
+    TaskHandle_t xBalancingTaskHandle = nullptr;
+    TaskHandle_t xMonitoringTaskHandle = nullptr;
+    TaskHandle_t xCommunicationTaskHandle = nullptr;
     
     // Task configurations
     TaskConfig balancing_task_config;

@@ -627,7 +627,7 @@ void BalanceRobotApp::IMUDataAvailableCallback(void* param) {
     
     app->imu->GetProcessedData(&app->status.imu_data);
 
-    if (app->xBalancingTaskHandle) {
+    if (app->xBalancingTaskHandle != nullptr) {
         BaseType_t higher_priority_task_woken = pdFALSE;
         vTaskNotifyGiveFromISR(app->xBalancingTaskHandle, &higher_priority_task_woken);
         portYIELD_FROM_ISR(higher_priority_task_woken);
@@ -823,10 +823,12 @@ Platform::Status BalanceRobotApp::CalibrateIMU(void) {
     
     Middleware::SystemServices::SystemTiming* timing_service = &Middleware::SystemServices::GetSystemTiming();
 
+    APP::CalibrationData &calibration = Middleware::Storage::stored_calibration.data;
+
     if (!calibration_in_progress) {
         // Initialize calibration
-        status.calibration.Reset();
-        status.calibration.calib_start_time_ms = timing_service->GetMilliseconds();
+        calibration.Reset();
+        calibration.calib_start_time_ms = timing_service->GetMilliseconds();
         
         // Start the calibration process
         calibration_in_progress = true;
@@ -855,25 +857,25 @@ Platform::Status BalanceRobotApp::CalibrateIMU(void) {
             return Platform::Status::ERROR;
         }
         // Store the offsets in the calibration structure
-        status.calibration.hw_gyro_offset[0] = gyro_offsets[0];
-        status.calibration.hw_gyro_offset[1] = gyro_offsets[1];
-        status.calibration.hw_gyro_offset[2] = gyro_offsets[2];
+        calibration.hw_gyro_offset[0] = gyro_offsets[0];
+        calibration.hw_gyro_offset[1] = gyro_offsets[1];
+        calibration.hw_gyro_offset[2] = gyro_offsets[2];
         
-        status.calibration.hw_accel_offset[0] = accel_offsets[0];
-        status.calibration.hw_accel_offset[1] = accel_offsets[1];
-        status.calibration.hw_accel_offset[2] = accel_offsets[2];
+        calibration.hw_accel_offset[0] = accel_offsets[0];
+        calibration.hw_accel_offset[1] = accel_offsets[1];
+        calibration.hw_accel_offset[2] = accel_offsets[2];
         
         // Save calibration duration
-        status.calibration.calib_duration_ms = 
-            timing_service->GetMilliseconds() - status.calibration.calib_start_time_ms;
+        calibration.calib_duration_ms = 
+            timing_service->GetMilliseconds() - calibration.calib_start_time_ms;
         
         // Mark calibration as complete
-        status.calibration.calibration_complete = true;
+        calibration.calibration_complete = true;
         
         // Save to flash memory
         Middleware::Storage::StorageManager& storage = Middleware::Storage::StorageManager::GetInstance();
         
-        storage.SaveCalibrationData(status.calibration);
+        storage.SaveCalibrationData(Middleware::Storage::stored_calibration);
         
         // Reset for next time
         calibration_in_progress = false;

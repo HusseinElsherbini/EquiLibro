@@ -27,7 +27,7 @@ struct StoredCalibrationData {
     uint32_t signature;                         // Signature to validate data
     uint32_t version;                           // Data format version
     uint32_t crc;                               // CRC32 checksum of calibration data
-    APP::CalibrationData calibration_data;      // Actual calibration data
+    APP::CalibrationData data;      // Actual calibration data
     
     // Optional: add timestamps, use count, etc.
     uint32_t save_count;                        // How many times calibration has been saved
@@ -41,6 +41,11 @@ constexpr uint32_t CALIBRATION_STORAGE_SECTOR = 5;      // Use the last sector (
 constexpr uint32_t CALIBRATION_STORAGE_OFFSET = 0;      // Offset from sector start
 constexpr uint32_t CALIBRATION_STORAGE_SIZE = sizeof(StoredCalibrationData);
 
+__attribute__((section(".user_data")))
+static StoredCalibrationData stored_calibration = {
+    .signature = CALIBRATION_SIGNATURE,
+    .version = CALIBRATION_VERSION
+};
 class StorageManager {
 public:
     // Get singleton instance
@@ -50,10 +55,10 @@ public:
     Platform::Status Init();
     
     // Save calibration data to flash
-    StorageStatus SaveCalibrationData(const APP::CalibrationData& calibration_data);
+    StorageStatus SaveCalibrationData(StoredCalibrationData& calibration_data);
     
     // Load calibration data from flash
-    StorageStatus LoadCalibrationData(APP::CalibrationData& calibration_data);
+    StorageStatus LoadCalibrationData(StoredCalibrationData& calibration_data);
     
     // Check if valid calibration data exists
     bool HasValidCalibrationData();

@@ -2,7 +2,8 @@ ENTRY(Reset_Handler)
 
 MEMORY
 {
-  FLASH(rx):ORIGIN =0x08000000,LENGTH =256K
+  FLASH(rx):ORIGIN =0x08000000,LENGTH =240K  /* First 240KB for code */
+  USER_DATA(r):ORIGIN =0x0803C000,LENGTH =16K  /* Last 16KB of sector 5 for user data */
   SRAM(rwx):ORIGIN =0x20000000,LENGTH =64K
 }
 
@@ -83,5 +84,10 @@ SECTIONS
       . = ALIGN(8);
       PROVIDE( _estack = . );
   } >SRAM
-
+  .user_data :
+  {
+    . = ALIGN(4);
+    *(.user_data)
+    . = ALIGN(4);
+  } > USER_DATA
 }

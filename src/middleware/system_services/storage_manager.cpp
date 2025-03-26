@@ -33,27 +33,22 @@ Platform::Status StorageManager::Init() {
     return Platform::Status::OK;
 }
 
-StorageStatus StorageManager::SaveCalibrationData(const APP::CalibrationData& calibration_data) {
+StorageStatus StorageManager::SaveCalibrationData(StoredCalibrationData& calibration_data) {
     if (!initialized) {
         return StorageStatus::NOT_INITIALIZED;
     }
     
     // Prepare data structure for storage
-    StoredCalibrationData stored_data;
-    stored_data.signature = CALIBRATION_SIGNATURE;
-    stored_data.version = CALIBRATION_VERSION;
-    stored_data.calibration_data = calibration_data;
-    
     // Add metadata
-    stored_data.save_count = 1;  // For first save, or increment if loading previous value
+    calibration_data.save_count = 1;  // For first save, or increment if loading previous value
     
     // Get current timestamp
     Middleware::SystemServices::SystemTiming& timing = 
         Middleware::SystemServices::SystemTiming::GetInstance();
-    stored_data.timestamp = timing.GetMilliseconds();
+    calibration_data.timestamp = timing.GetMilliseconds();
     
     // Calculate CRC
-    stored_data.crc = CalculateCRC32(&stored_data.calibration_data, sizeof(APP::CalibrationData));
+    calibration_data.crc = CalculateCRC32(&calibration_data.data, sizeof(APP::CalibrationData));
     
     // Get storage address
     uint32_t storage_addr = GetCalibrationStorageAddress();
@@ -72,7 +67,7 @@ StorageStatus StorageManager::SaveCalibrationData(const APP::CalibrationData& ca
     }
     
     // Write data to flash
-    status = flash.WriteData(storage_addr, &stored_data, sizeof(StoredCalibrationData));
+    status = flash.WriteData(storage_addr, &calibration_data, sizeof(StoredCalibrationData));
     
     // Lock flash when done
     flash.Lock();
@@ -84,7 +79,7 @@ StorageStatus StorageManager::SaveCalibrationData(const APP::CalibrationData& ca
     return StorageStatus::OK;
 }
 
-StorageStatus StorageManager::LoadCalibrationData(APP::CalibrationData& calibration_data) {
+StorageStatus StorageManager::LoadCalibrationData(StoredCalibrationData& calibration_data) {
     if (!initialized) {
         return StorageStatus::NOT_INITIALIZED;
     }
@@ -111,13 +106,13 @@ StorageStatus StorageManager::LoadCalibrationData(APP::CalibrationData& calibrat
     }
     
     // Verify CRC
-    uint32_t calculated_crc = CalculateCRC32(&stored_data.calibration_data, sizeof(APP::CalibrationData));
+    uint32_t calculated_crc = CalculateCRC32(&stored_data.data, sizeof(APP::CalibrationData));
     if (calculated_crc != stored_data.crc) {
         return StorageStatus::INVALID_DATA;
     }
     
     // Copy calibration data to output
-    calibration_data = stored_data.calibration_data;
+    calibration_data.data = stored_data.data;
     
     return StorageStatus::OK;
 }
@@ -149,7 +144,7 @@ bool StorageManager::HasValidCalibrationData() {
     }
     
     // Verify CRC
-    uint32_t calculated_crc = CalculateCRC32(&stored_data.calibration_data, sizeof(APP::CalibrationData));
+    uint32_t calculated_crc = CalculateCRC32(&stored_data.data, sizeof(APP::CalibrationData));
     if (calculated_crc != stored_data.crc) {
         return false;
     }
