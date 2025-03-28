@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "platform.hpp"
-
+#include "FreeRTOSConfig.h"
 
 
 namespace Platform {
@@ -124,7 +124,9 @@ namespace Platform {
             constexpr uint8_t PRIORITY_HIGH = 0x40U;
             constexpr uint8_t PRIORITY_MEDIUM = 0x80U;
             constexpr uint8_t PRIORITY_LOW = 0xC0U;
-        
+            // Define a raw (unshifted) FreeRTOS-safe priority
+            constexpr uint8_t PRIORITY_FREERTOS_SAFE = configMAX_SYSCALL_INTERRUPT_PRIORITY >> (8 - configPRIO_BITS);
+
             // NVIC priority grouping
             constexpr uint32_t PRIORITYGROUP_0 = 0x00000007U; // 0 bits for pre-emption priority, 4 bits for subpriority
             constexpr uint32_t PRIORITYGROUP_1 = 0x00000006U; // 1 bits for pre-emption priority, 3 bits for subpriority

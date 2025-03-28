@@ -118,6 +118,14 @@ private:
         uint16_t data_size;
         uint32_t timeout_ms;
         uint64_t start_time;    // For timeout tracking in interrupts
+    
+        // field for transfer context
+        enum class TransferContext {
+            Generic,
+            SensorData,
+            ConfigOperation,
+            CalibrationOperation
+        } transfer_context;
         
         // For FreeRTOS task notification
         void* notify_task;

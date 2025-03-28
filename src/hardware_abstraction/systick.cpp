@@ -1,9 +1,16 @@
 ﻿// src/hardware_abstraction/systick.cpp
-
+#include "os/FreeRTOSConfig.h"
 #include "hardware_abstraction/systick.hpp"
 #include <memory>
 #include <mutex>
 #include "common/platform.hpp"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "portmacro.h" // Include the header that defines xPortSysTickHandler
+extern "C" {
+    // Declare the FreeRTOS tick handler function
+    void xPortSysTickHandler(void);
+}
 namespace Platform {
 namespace CMSIS {
 namespace SysTick {
@@ -277,22 +284,18 @@ bool SysTickInterface::HasTimeoutOccurred(uint64_t timeout) const {
 }
 } // namespace SysTick
 } // namespace CMSIS
+
 extern "C" void SysTick_Handler(void) {
-    // Get the singleton instance safely
-    auto systick_instance = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();    
-    // Check if the instance exists and is valid before using it
-    if (systick_instance) {
-        // Increment tick count 
-        systick_instance->tick_count.fetch_add(1, std::memory_order_relaxed); // atomic increment
-        
-        // Check if callbacks array is initialized and the specific callback exists
-        if (static_cast<uint32_t>(Platform::CMSIS::SysTick::SysTickCallbackType::Tick) < 
-            static_cast<uint32_t>(Platform::CMSIS::SysTick::SysTickCallbackType::Max)) {
-            
-            // Get the callback entry safely
-            auto& callback = systick_instance->callbacks[static_cast<uint32_t>(Platform::CMSIS::SysTick::SysTickCallbackType::Tick)];
-            
-            // Call the callback if it's registered
+    // If in the context of FreeRTOS, call the FreeRTOS SysTick handler
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        xPortSysTickHandler();
+    } else {
+        // Your existing SysTick logic for when FreeRTOS is not running
+        auto systick_instance = &Platform::CMSIS::SysTick::SysTickInterface::GetInstance();    
+        if (systick_instance) {
+            systick_instance->tick_count.fetch_add(1, std::memory_order_relaxed);
+            auto& callback = systick_instance->callbacks[static_cast<uint32_t>(
+                Platform::CMSIS::SysTick::SysTickCallbackType::Tick)];
             if (callback.callback != nullptr) {
                 callback.callback(callback.param);
             }

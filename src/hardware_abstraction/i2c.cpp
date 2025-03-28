@@ -383,12 +383,13 @@ Platform::Status I2CInterface::Init(void* config) {
         }
         
         // Set interrupt priorities
-        Platform::CMSIS::NVIC::setPriority(ev_irq, Platform::CMSIS::NVIC::PRIORITY_MEDIUM);
-        Platform::CMSIS::NVIC::setPriority(er_irq, Platform::CMSIS::NVIC::PRIORITY_MEDIUM);
+        Platform::CMSIS::NVIC::setPriority(ev_irq, Platform::CMSIS::NVIC::PRIORITY_FREERTOS_SAFE);
+        Platform::CMSIS::NVIC::setPriority(er_irq, Platform::CMSIS::NVIC::PRIORITY_FREERTOS_SAFE);
         
         // Enable the interrupts
         Platform::CMSIS::NVIC::enableIRQ(ev_irq);
         Platform::CMSIS::NVIC::enableIRQ(er_irq);
+
     }
     
     // Enable I2C peripheral

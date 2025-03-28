@@ -12,15 +12,23 @@ Platform::Status BalanceRobotApp::InitializeTasks() {
         .name = "BalanceTask",
         .auto_start = false
     };
-    /*//TODO: 
+    
     // Configure monitoring task
     monitoring_task_config = {
-        .stack_size = 128,
-        .priority = tskIDLE_PRIORITY + 1,
+        .stack_size = APP::MONITOR_TASK_STACK_SIZE,  // Use constant from header
+        .priority = APP::TASK_PRIORITY_LOGGING,      // Use appropriate priority
         .name = "MonitorTask",
         .auto_start = false
     };
-    */
+    
+    // Create communication task
+    communication_task_config = {
+        .stack_size = APP::MGM_TASK_STACK_SIZE,
+        .priority = APP::TASK_PRIORITY_MGM_COMM,
+        .name = "CommTask",
+        .auto_start = false
+    };
+    
     // Create tasks but don't start them yet
     BaseType_t result = xTaskCreate(
         vBalancingTask,
@@ -42,6 +50,19 @@ Platform::Status BalanceRobotApp::InitializeTasks() {
         this,
         monitoring_task_config.priority,
         &xMonitoringTaskHandle
+    );
+    
+    if (result != pdPASS) {
+        // Could log warning but continue
+    }
+    
+    result = xTaskCreate(
+        vCommunicationTask,
+        communication_task_config.name,
+        communication_task_config.stack_size,
+        this,
+        communication_task_config.priority,
+        &xCommunicationTaskHandle
     );
     
     if (result != pdPASS) {
@@ -76,7 +97,7 @@ Platform::Status BalanceRobotApp::StopTasks() {
 }
 
 void BalanceRobotApp::RegisterBalancingTask(TaskHandle_t handle) {
-    xBalancingTaskHandle = handle;
+    this->xBalancingTaskHandle = handle;
     
     // Now safe to enable interrupts
     RobotConfig.imu_config.interrupt_enabled = true;
@@ -87,17 +108,45 @@ void vBalancingTask(void* params) {
     // Get the app instance that was passed during task creation
     BalanceRobotApp* app = static_cast<BalanceRobotApp*>(params);
     ProcessType processType = ProcessType::Balancing;
-    
+    Platform::GPIO::GpioInterface *test_gpio = &Platform::GPIO::GpioInterface::GetInstance();
+
+    // Register this task's handle so IMU callbacks can notify it
     app->RegisterBalancingTask(xTaskGetCurrentTaskHandle());
+    
+    // Initialize counters for monitoring
+    uint32_t successful_notifications = 0;
+    uint32_t timeout_count = 0;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
     while (true) {
-
+        // Wait for notification with timeout
         uint32_t notificationValue = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(IMU_I2C_TIMEOUT_TICKS));
-        // Process the balance application
-        app->Process(&processType);
         
-        // Short delay to yield to other tasks
-        vTaskDelay(APP::BALANCING_TASK_PERIOD_MS);
+        if (notificationValue > 0) {
+            // We received a proper notification from the IMU data callback
+            successful_notifications++;
+            
+            // Process the balance application with the latest IMU data
+            //app->Process(&processType);
+            
+            // Toggle LED to indicate successful data processing
+            test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
+        } else {
+            // Timeout occurred - no notification received within the specified time
+            timeout_count++;
+            
+            // Handle timeout - maybe check if IMU is still responding
+            if (timeout_count > 10) {  // After several consecutive timeouts
+                // Log error or attempt recovery
+                // app->CheckIMUStatus();
+                timeout_count = 0;  // Reset counter after attempting recovery
+            }
+            
+            // You might want to toggle a different pin to indicate timeout
+            test_gpio->TogglePin(Platform::GPIO::Port::PORTB, 13);
+        }
+        
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(BALANCING_TASK_PERIOD_MS));  
     }
 }
 

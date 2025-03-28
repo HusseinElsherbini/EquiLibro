@@ -6,7 +6,6 @@
 namespace Middleware {
 namespace Storage {
 
-
 StorageManager& StorageManager::GetInstance() {
     static StorageManager instance;
     return instance;
@@ -32,29 +31,35 @@ Platform::Status StorageManager::Init() {
     initialized = true;
     return Platform::Status::OK;
 }
-
-StorageStatus StorageManager::SaveCalibrationData(StoredCalibrationData& calibration_data) {
+__attribute__((optimize("O0"))) 
+StorageStatus StorageManager::SaveCalibrationData(APP::CalibrationData& calibration_data) {
     if (!initialized) {
         return StorageStatus::NOT_INITIALIZED;
-    }
-    
-    // Prepare data structure for storage
-    // Add metadata
-    calibration_data.save_count = 1;  // For first save, or increment if loading previous value
+    }    
     
     // Get current timestamp
     Middleware::SystemServices::SystemTiming& timing = 
         Middleware::SystemServices::SystemTiming::GetInstance();
-    calibration_data.timestamp = timing.GetMilliseconds();
-    
+
+
+    // Create a storage wrapper structure
+    Middleware::Storage::StoredCalibrationData calData = {
+        .signature = Middleware::Storage::CALIBRATION_SIGNATURE,
+        .version = Middleware::Storage::CALIBRATION_VERSION,
+        .crc = 0,  
+        .data = calibration_data,  
+        .save_count = 1,  
+        .timestamp = timing.GetMilliseconds()
+    };
+    // Prepare data structure for storage
     // Calculate CRC
-    calibration_data.crc = CalculateCRC32(&calibration_data.data, sizeof(APP::CalibrationData));
+    calData.crc = CalculateCRC32(&calibration_data, sizeof(APP::CalibrationData));
     
     // Get storage address
-    uint32_t storage_addr = GetCalibrationStorageAddress();
+    volatile uint32_t storage_addr = GetCalibrationStorageAddress();
     
     // Unlock flash
-    Platform::Status status = flash.Unlock();
+    volatile Platform::Status status = flash.Unlock();
     if (status != Platform::Status::OK) {
         return StorageStatus::WRITE_ERROR;
     }
@@ -67,7 +72,7 @@ StorageStatus StorageManager::SaveCalibrationData(StoredCalibrationData& calibra
     }
     
     // Write data to flash
-    status = flash.WriteData(storage_addr, &calibration_data, sizeof(StoredCalibrationData));
+    status = flash.WriteData(storage_addr, &calData, sizeof(StoredCalibrationData));
     
     // Lock flash when done
     flash.Lock();
@@ -87,37 +92,33 @@ StorageStatus StorageManager::LoadCalibrationData(StoredCalibrationData& calibra
     // Get storage address
     uint32_t storage_addr = GetCalibrationStorageAddress();
     
-    // Read data from flash
-    StoredCalibrationData stored_data;
-    Platform::Status status = flash.ReadData(storage_addr, &stored_data, sizeof(StoredCalibrationData));
+    Platform::Status status = flash.ReadData(storage_addr, &calibration_data, sizeof(StoredCalibrationData));
     
     if (status != Platform::Status::OK) {
         return StorageStatus::READ_ERROR;
     }
     
     // Verify signature
-    if (stored_data.signature != CALIBRATION_SIGNATURE) {
+    if (calibration_data.signature != CALIBRATION_SIGNATURE) {
         return StorageStatus::NO_DATA_FOUND;
     }
     
     // Verify version compatibility
-    if (stored_data.version != CALIBRATION_VERSION) {
+    if (calibration_data.version != CALIBRATION_VERSION) {
         return StorageStatus::INVALID_DATA;
     }
     
     // Verify CRC
-    uint32_t calculated_crc = CalculateCRC32(&stored_data.data, sizeof(APP::CalibrationData));
-    if (calculated_crc != stored_data.crc) {
+    uint32_t calculated_crc = CalculateCRC32(&calibration_data.data, sizeof(APP::CalibrationData));
+    if (calculated_crc != calibration_data.crc) {
         return StorageStatus::INVALID_DATA;
     }
     
-    // Copy calibration data to output
-    calibration_data.data = stored_data.data;
     
     return StorageStatus::OK;
 }
 
-bool StorageManager::HasValidCalibrationData() {
+bool StorageManager::HasValidCalibrationData(void) {
     if (!initialized) {
         return false;
     }

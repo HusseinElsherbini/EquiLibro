@@ -10,6 +10,7 @@
 #include "sbr_app_types.hpp"
 #include "sbr_app_events.hpp"
 #include "sbr_app_tasks.hpp"
+#include "storage_manager.hpp"
 
 #include <memory>
 #include <map>
@@ -93,8 +94,10 @@ public:
     Platform::Status GetPerformanceMetrics(RobotTiming& timing);
     
     // Calibrate IMU
-    Platform::Status CalibrateIMU();
+    Platform::Status CalibrateIMU(void);
     
+    Platform::Status CheckCalibration(void);
+
     // Friend task functions so they can access private members
     friend void vBalancingTask(void* params);
     friend void vMonitoringTask(void* params);

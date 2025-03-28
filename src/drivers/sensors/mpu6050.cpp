@@ -322,18 +322,15 @@ namespace Sensors {
      */
     Platform::Status MPU6050::ResetDevice() {
 
-        Platform::GPIO::GpioInterface *test_gpio = &Platform::GPIO::GpioInterface::GetInstance();
         // Set reset bit in PWR_MGMT_1 register
         Platform::Status status = WriteRegister(MPU6050Reg::PWR_MGMT_1, 0x80);
         if (status != Platform::Status::OK) {
             return status;
         }
-        //TODO: REMOVE TOGGLE 
-        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
+
         // Wait for reset to complete
         timing_service->DelayMilliseconds(100);
         
-        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
         // Clear reset bit and set clock source
         status = SetClockSource(config.clock_source);
         if (status != Platform::Status::OK) {
@@ -731,6 +728,8 @@ namespace Sensors {
             return Platform::Status::BUSY;
         }
         
+        current_operation = OperationType::SensorDataRead;
+        
         // Mark transfer as in progress
         transfer_in_progress = true;
         
@@ -786,36 +785,43 @@ namespace Sensors {
         
         // Process command
         switch (command) {
+            
             case MPU6050_CTRL_SET_GYRO_RANGE: {
                     if (!arg) return Platform::Status::INVALID_PARAM;
                     return SetGyroRange(*static_cast<uint8_t*>(arg));
                 }
+            
             case MPU6050_CTRL_SET_ACCEL_RANGE: {
                     if (!arg) return Platform::Status::INVALID_PARAM;
                     return SetAccelRange(*static_cast<uint8_t*>(arg));
                 }
+            
             case MPU6050_CTRL_SET_SAMPLE_RATE: {
                     if (!arg) return Platform::Status::INVALID_PARAM;
                     return SetSampleRateDiv(*static_cast<uint8_t*>(arg));
                 }
+            
             case MPU6050_CTRL_SET_DLPF_MODE: {
                     if (!arg) return Platform::Status::INVALID_PARAM;
                     return SetDLPFMode(*static_cast<uint8_t*>(arg));
                 }
+            
             case MPU6050_CTRL_SET_CLOCK_SOURCE: {
                 if (!arg) return Platform::Status::INVALID_PARAM;
                 return SetClockSource(*static_cast<uint8_t*>(arg));
                 }
-            case MPU6050_CTRL_RESET_DEVICE:
+           
+            case MPU6050_CTRL_RESET_DEVICE: {
                 return ResetDevice();
-                
+            }
+           
             case MPU6050_CTRL_GET_MOTION: {
                 if (!arg) return Platform::Status::INVALID_PARAM;
                 
                 // Read all motion data
                 return ReadData(arg, sizeof(MPU6050Data));
             }
-                
+          
             case MPU6050_CTRL_GET_ACCEL: {
                 if (!arg) return Platform::Status::INVALID_PARAM;
                 
@@ -924,7 +930,7 @@ namespace Sensors {
                     
                     Platform::GPIO::GpioInterface& gpio = Platform::GPIO::GpioInterface::GetInstance();
 
-                    status = gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, false);
+                    status = gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, true);
                     if (status != Platform::Status::OK) {
                         return status;
                     }
@@ -1240,9 +1246,11 @@ namespace Sensors {
             case MPU6050_CTRL_CALIBRATE_ITERATIVE: {
                 return CalibrateIterative();
             }
-            default:
+            
+            default: {
                 // Try the base class implementation for common commands
                 return Platform::Status::INVALID_PARAM;
+            }
         }
     }
 
@@ -1291,7 +1299,7 @@ namespace Sensors {
         
         // Start an I2C transaction if in auto mode
         if (current_mode == MPU6050_MODE_AUTO) {
-            Platform::Status status = ReadRegisters(Drivers::Sensors::MPU6050Reg::ACCEL_XOUT_H, sensor_buffer.data(), sensor_buffer.size(), config.i2c_timeout_ms);
+            Platform::Status status = ReadDataAsync();
             if(status == Platform::Status::BUSY){
                 //TODO:: add error checking mechanism 
             }
@@ -1313,15 +1321,28 @@ namespace Sensors {
         return Platform::Status::OK;
     }   
     
-    void MPU6050::HandleI2CTransferComplete() {
-        // Process the raw data
-        ParseSensorData();
+    void MPU6050::HandleI2CTransferComplete(void) {
 
-        ProcessIMURawData();
+        // Save the operation type before resetting it
+        volatile OperationType completed_operation = this->current_operation;
         
-        // Notify application about data availability
-        TriggerCallback(MPU6050Event::MPU6050_EVENT_DATA_AVAILABLE);
-
+        // Reset the transfer state and operation type immediately
+        transfer_in_progress = false;
+        current_operation = OperationType::None;  // Reset here
+        
+        // Only process sensor data operations
+        if (completed_operation == OperationType::SensorDataRead) {
+            // Process the raw data
+            ParseSensorData();
+            ProcessIMURawData();
+            
+            // Trigger the correct event for sensor data
+            TriggerCallback(MPU6050Event::MPU6050_EVENT_DATA_AVAILABLE);
+        }
+        // Handle other operation types as needed
+        else if (completed_operation == OperationType::CalibrationOp) {
+            // Maybe trigger a calibration complete event
+        }
     }
 
     bool MPU6050::IsDataReady() {

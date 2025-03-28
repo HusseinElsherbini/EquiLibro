@@ -3,6 +3,7 @@
 #include "application/robot_logic/sbr_app.hpp"
 #include "math.h"
 #include "storage_manager.hpp"
+#include "sbr_app_tasks.hpp"
 namespace APP {
 
 // Initialize static instance pointer
@@ -531,15 +532,15 @@ Platform::Status BalanceRobotApp::HandleCommand(uint32_t cmd_id, void* params) {
             *static_cast<AppState*>(params) = current_state;
             return Platform::Status::OK;
         }
-        case APP_CMD_START_CALIBRATION:
+        case APP_CMD_START_CALIBRATION: {
             if (current_state != AppState::Idle) {
                 return Platform::Status::INVALID_STATE;
             }
             
             current_state = AppState::Calibration;
             return CalibrateIMU();
-            
-        case APP_CMD_START_SELF_TEST:
+        }
+        case APP_CMD_START_SELF_TEST: {
             if (current_state != AppState::Idle) {
                 return Platform::Status::INVALID_STATE;
             }
@@ -548,18 +549,18 @@ Platform::Status BalanceRobotApp::HandleCommand(uint32_t cmd_id, void* params) {
             // TODO: Implement self-test
             current_state = AppState::Idle;
             return Platform::Status::OK;
-            
+        }
         // Custom commands for balance robot
-        case 0x4001:  // Example: Set target angle
+        case 0x4001: { // Example: Set target angle
             if (params == nullptr) {
                 return Platform::Status::INVALID_PARAM;
             }
             
             return SetTargetAngle(*static_cast<float*>(params));
-            
-        case 0x4002:  // Example: Emergency stop
+        }
+        case 0x4002: {// Example: Emergency stop
             return EmergencyStop(true);
-            
+        }
         default:
             return Platform::Status::NOT_SUPPORTED;
     }
@@ -628,9 +629,15 @@ void BalanceRobotApp::IMUDataAvailableCallback(void* param) {
     app->imu->GetProcessedData(&app->status.imu_data);
 
     if (app->xBalancingTaskHandle != nullptr) {
-        BaseType_t higher_priority_task_woken = pdFALSE;
-        vTaskNotifyGiveFromISR(app->xBalancingTaskHandle, &higher_priority_task_woken);
-        portYIELD_FROM_ISR(higher_priority_task_woken);
+
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+        xTaskNotifyFromISR(app->xBalancingTaskHandle,
+        NOTIFY_IMU_DATA,
+        eSetBits,
+        &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
     }
     
     // End timing
@@ -813,6 +820,7 @@ Platform::Status BalanceRobotApp::SetPIDParameters(const PIDConfig& config) {
 }
 
 // Calibrate IMU
+__attribute__((optimize("O0"))) 
 Platform::Status BalanceRobotApp::CalibrateIMU(void) {
 
     // Static variable to track if calibration is in progress
@@ -823,12 +831,12 @@ Platform::Status BalanceRobotApp::CalibrateIMU(void) {
     
     Middleware::SystemServices::SystemTiming* timing_service = &Middleware::SystemServices::GetSystemTiming();
 
-    APP::CalibrationData &calibration = Middleware::Storage::stored_calibration.data;
+    APP::CalibrationData calibration_data;
 
     if (!calibration_in_progress) {
         // Initialize calibration
-        calibration.Reset();
-        calibration.calib_start_time_ms = timing_service->GetMilliseconds();
+        calibration_data.Reset();
+        calibration_data.calib_start_time_ms = timing_service->GetMilliseconds();
         
         // Start the calibration process
         calibration_in_progress = true;
@@ -844,6 +852,9 @@ Platform::Status BalanceRobotApp::CalibrateIMU(void) {
     if (calib_status == Platform::Status::OK) {
         // Calibration completed successfully
         
+        // grab flash interface instance
+        Platform::FLASH::FlashInterface * flash = &Platform::FLASH::FlashInterface::GetInstance();
+
         // Read the final offsets
         int16_t gyro_offsets[3];
         int16_t accel_offsets[3];
@@ -856,26 +867,33 @@ Platform::Status BalanceRobotApp::CalibrateIMU(void) {
         if(calib_status != Platform::Status::OK){
             return Platform::Status::ERROR;
         }
-        // Store the offsets in the calibration structure
-        calibration.hw_gyro_offset[0] = gyro_offsets[0];
-        calibration.hw_gyro_offset[1] = gyro_offsets[1];
-        calibration.hw_gyro_offset[2] = gyro_offsets[2];
         
-        calibration.hw_accel_offset[0] = accel_offsets[0];
-        calibration.hw_accel_offset[1] = accel_offsets[1];
-        calibration.hw_accel_offset[2] = accel_offsets[2];
+        //unlock flash before writing 
+        calib_status = flash->Unlock();
+        if(calib_status != Platform::Status::OK){
+            return Platform::Status::ERROR;
+        }
+
+        // Store the offsets in the calibration structure
+        calibration_data.hw_gyro_offset[0] = gyro_offsets[0];
+        calibration_data.hw_gyro_offset[1] = gyro_offsets[1];
+        calibration_data.hw_gyro_offset[2] = gyro_offsets[2];
+        
+        calibration_data.hw_accel_offset[0] = accel_offsets[0];
+        calibration_data.hw_accel_offset[1] = accel_offsets[1];
+        calibration_data.hw_accel_offset[2] = accel_offsets[2];
         
         // Save calibration duration
-        calibration.calib_duration_ms = 
-            timing_service->GetMilliseconds() - calibration.calib_start_time_ms;
+        calibration_data.calib_duration_ms = 
+            timing_service->GetMilliseconds() - calibration_data.calib_start_time_ms;
         
         // Mark calibration as complete
-        calibration.calibration_complete = true;
+        calibration_data.calibration_complete = true;
         
         // Save to flash memory
         Middleware::Storage::StorageManager& storage = Middleware::Storage::StorageManager::GetInstance();
         
-        storage.SaveCalibrationData(Middleware::Storage::stored_calibration);
+        storage.SaveCalibrationData(calibration_data);
         
         // Reset for next time
         calibration_in_progress = false;
@@ -979,4 +997,42 @@ void BalanceRobotApp::BatteryStatusCallback(void* param) {
         */
 }
 
+Platform::Status BalanceRobotApp::CheckCalibration(void){
+
+    Platform::Status status = Platform::Status::OK;
+
+    // Check for calibration (add this if not already there)
+    Middleware::Storage::StorageManager& storage = Middleware::Storage::StorageManager::GetInstance();
+    if (!storage.HasValidCalibrationData()) {
+        // Need to calibrate before starting
+        Platform::Status calibration_success = CalibrateIMU();
+        if (calibration_success != Platform::Status::OK) {
+            // Handle calibration failure
+            status = Platform::Status::ERROR;
+        }
+    }
+    else{
+
+        Middleware::Storage::StoredCalibrationData calibration_data= {};
+        //load calibration data and program MPU6050
+        Middleware::Storage::StorageStatus storage_status = storage.LoadCalibrationData(calibration_data);
+        if(storage_status != Middleware::Storage::StorageStatus::OK){
+            // Handle flash memory retrieval error
+            status = Platform::Status::ERROR;
+        }
+
+        // write offsets to mpu 
+        imu->SetAllOffsets(calibration_data.data.hw_accel_offset[0],
+                           calibration_data.data.hw_accel_offset[1], 
+                           calibration_data.data.hw_accel_offset[2],
+                           calibration_data.data.hw_gyro_offset[0],
+                           calibration_data.data.hw_gyro_offset[1],
+                           calibration_data.data.hw_gyro_offset[2]);
+        if (status != Platform::Status::OK) {
+                // Handle calibration failure
+                status = Platform::Status::ERROR;
+        }
+    }
+    return status;
+}
 } // namespace APP

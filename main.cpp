@@ -1,3 +1,4 @@
+#include "os/FreeRTOSConfig.h"
 #include "robot_logic/sbr_app.hpp"
 #include "middleware/utils/system_configurator.hpp"
 #include "middleware/system_services/system_manager.hpp"
@@ -248,16 +249,15 @@ int main() {
     // The singleton is already initialized in InitBalanceRobotApp
     APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
 
-    // Check for calibration (add this if not already there)
-    Middleware::Storage::StorageManager& storage = Middleware::Storage::StorageManager::GetInstance();
-    if (!storage.HasValidCalibrationData()) {
-        // Need to calibrate before starting
-        Platform::Status calibration_success = balance_app.CalibrateIMU();
-        if (calibration_success != Platform::Status::OK) {
-            // Handle calibration failure
-            while(1) {}
+    // Check calibration 
+    status = balance_app.CheckCalibration();
+    if (status != Platform::Status::OK) {
+        // Error handling - could blink an LED or log error
+        while (1) {
+            // If calibration fails, we can't proceed
         }
     }
+
     // Create and start tasks
     balance_app.InitializeTasks();
     

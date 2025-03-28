@@ -23,7 +23,7 @@ enum class StorageStatus {
 };
 
 // Structure for stored calibration data with metadata
-struct StoredCalibrationData {
+struct __attribute__((aligned(4))) StoredCalibrationData {
     uint32_t signature;                         // Signature to validate data
     uint32_t version;                           // Data format version
     uint32_t crc;                               // CRC32 checksum of calibration data
@@ -32,8 +32,10 @@ struct StoredCalibrationData {
     // Optional: add timestamps, use count, etc.
     uint32_t save_count;                        // How many times calibration has been saved
     uint64_t timestamp;                         // When calibration was last saved
+
 };
 
+extern StoredCalibrationData stored_calibration;
 // Flash storage locations
 constexpr uint32_t CALIBRATION_SIGNATURE = 0xCAB10000;  // Signature to validate stored data
 constexpr uint32_t CALIBRATION_VERSION = 1;             // Version of calibration data format
@@ -41,11 +43,6 @@ constexpr uint32_t CALIBRATION_STORAGE_SECTOR = 5;      // Use the last sector (
 constexpr uint32_t CALIBRATION_STORAGE_OFFSET = 0;      // Offset from sector start
 constexpr uint32_t CALIBRATION_STORAGE_SIZE = sizeof(StoredCalibrationData);
 
-__attribute__((section(".user_data")))
-static StoredCalibrationData stored_calibration = {
-    .signature = CALIBRATION_SIGNATURE,
-    .version = CALIBRATION_VERSION
-};
 class StorageManager {
 public:
     // Get singleton instance
@@ -55,13 +52,13 @@ public:
     Platform::Status Init();
     
     // Save calibration data to flash
-    StorageStatus SaveCalibrationData(StoredCalibrationData& calibration_data);
+    StorageStatus SaveCalibrationData(APP::CalibrationData& calibration_data);
     
     // Load calibration data from flash
     StorageStatus LoadCalibrationData(StoredCalibrationData& calibration_data);
     
     // Check if valid calibration data exists
-    bool HasValidCalibrationData();
+    bool HasValidCalibrationData(void);
     
     // Erase calibration data
     StorageStatus EraseCalibrationData();

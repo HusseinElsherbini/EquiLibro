@@ -343,7 +343,6 @@ Platform::Status FlashInterfaceImpl::ReadData(uint32_t address, void* data, uint
     return Platform::Status::OK;
 }
 
-// Write data to flash
 Platform::Status FlashInterfaceImpl::WriteData(uint32_t address, const void* data, uint32_t size) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
@@ -354,7 +353,7 @@ Platform::Status FlashInterfaceImpl::WriteData(uint32_t address, const void* dat
     }
     
     // Validate address range
-    if (address < 0x08000000 || address + size > 0x08080000) {
+    if (address < 0x08000000 || address + size > GetFlashEndAddress()) {
         return Platform::Status::INVALID_PARAM;
     }
     
@@ -373,35 +372,33 @@ Platform::Status FlashInterfaceImpl::WriteData(uint32_t address, const void* dat
         return Platform::Status::TIMEOUT;
     }
     
-    // Set program mode in CR register
+    // Clear any previous error flags
+    flash_regs->SR = 0xF2;
+    
+    // Set program mode in CR register - USE BYTE PROGRAMMING ONLY FOR RELIABILITY
     uint32_t cr_value = flash_regs->CR;
     cr_value &= ~(0x03 << 8); // Clear PG, SER, MER bits
+    cr_value &= ~(0x03 << 8); // Clear PSIZE bits (set to 00 - byte programming)
     cr_value |= (1 << 0);     // Set PG bit for programming
     flash_regs->CR = cr_value;
     
-    // Program flash one byte/halfword/word at a time depending on alignment
+    // Program flash one byte at a time
     const uint8_t* src_ptr = static_cast<const uint8_t*>(data);
     Platform::Status status = Platform::Status::OK;
     
-    for (uint32_t i = 0; i < size && status == Platform::Status::OK; ) {
-        if ((address + i) % 4 == 0 && i + 4 <= size) {
-            // Word-aligned write
-            uint32_t word_value = *reinterpret_cast<const uint32_t*>(src_ptr + i);
-            *reinterpret_cast<volatile uint32_t*>(address + i) = word_value;
-            i += 4;
-        } else if ((address + i) % 2 == 0 && i + 2 <= size) {
-            // Half-word aligned write
-            uint16_t halfword_value = *reinterpret_cast<const uint16_t*>(src_ptr + i);
-            *reinterpret_cast<volatile uint16_t*>(address + i) = halfword_value;
-            i += 2;
-        } else {
-            // Byte write
-            *reinterpret_cast<volatile uint8_t*>(address + i) = src_ptr[i];
-            i += 1;
-        }
+    for (uint32_t i = 0; i < size && status == Platform::Status::OK; i++) {
+        // Byte write - works universally
+        *reinterpret_cast<volatile uint8_t*>(address + i) = src_ptr[i];
         
         // Wait for the operation to complete
         status = WaitForOperation(1000);
+        
+        // If we got an error, stop immediately
+        if (status != Platform::Status::OK) {
+            // Log the specific error flags if possible
+            // uint32_t error_flags = flash_regs->SR & 0xF2;
+            break;
+        }
     }
     
     // Clear PG bit
@@ -424,6 +421,7 @@ Platform::Status FlashInterfaceImpl::WriteData(uint32_t address, const void* dat
 }
 
 // Erase a flash sector
+__attribute__((optimize("O0"))) 
 Platform::Status FlashInterfaceImpl::EraseSector(uint8_t sector) {
     if (!initialized) {
         return Platform::Status::NOT_INITIALIZED;
@@ -664,6 +662,7 @@ Platform::Status FlashInterfaceImpl::Unlock() {
  }
  
  // Wait for flash operation to complete
+ __attribute__((optimize("O0"))) 
  Platform::Status FlashInterfaceImpl::WaitForOperation(uint32_t timeout_ms) {
     // Get start time
     Middleware::SystemServices::SystemTiming &timing = Middleware::SystemServices::SystemTiming::GetInstance();

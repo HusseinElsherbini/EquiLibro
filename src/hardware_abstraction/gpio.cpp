@@ -333,7 +333,7 @@ Platform::Status GpioInterface::EnableInterrupt(Port port, uint8_t pin, bool ena
         } else {
             irq = Platform::CMSIS::NVIC::IRQn::EXTI15_10;
         }
-        
+        Platform::CMSIS::NVIC::setPriority(irq, Platform::CMSIS::NVIC::PRIORITY_FREERTOS_SAFE);
         Platform::CMSIS::NVIC::enableIRQ(irq);
     } else {
         // Disable EXTI line interrupt
@@ -410,10 +410,6 @@ extern "C" {
         // Get pending interrupts for pins 5-9
         uint16_t pending = Platform::GPIO::getEXTI()->PR & Platform::GPIO::getEXTI()->IMR & 0x03E0; // Mask for pins 5-9
 
-        //TODO: REMOVE TOGGLE 
-        Platform::GPIO::GpioInterface *test_gpio = &Platform::GPIO::GpioInterface::GetInstance();
-
-        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
         // Handle EXTI5-9 interrupts
         Platform::GPIO::GpioInterface::HandleExternalInterrupt(pending);
     }

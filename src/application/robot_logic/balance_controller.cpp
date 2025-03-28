@@ -41,10 +41,9 @@ namespace APP {
     }   
     // Explicit init method with dependency injection
     Platform::Status BalanceController::Init(Drivers::Sensors::MPU6050* imu_interface,
-                         Drivers::Motor::VNH5019Driver* left_motor,
-                         Drivers::Motor::VNH5019Driver* right_motor,
-                         const PIDConfig* config) {
-        
+                        Drivers::Motor::VNH5019Driver* left_motor,
+                        Drivers::Motor::VNH5019Driver* right_motor,
+                        const PIDConfig* config) {
         
         // Check for valid interfaces
         if (!imu_interface || !left_motor || !right_motor) {
@@ -60,6 +59,10 @@ namespace APP {
         }
         
         this->Initialized = true;
+        
+        // Transition to idle state after successful initialization
+        TransitionToState(BalanceState::Idle);
+        
         return Platform::Status::OK;
     }
 
@@ -433,8 +436,12 @@ namespace APP {
         status.pid_output.integral_sum = 0.0f;
         status.pid_output.prev_error = 0.0f;
         
-        // Transition to balancing state (this will enable motors and set up entry actions)
-        TransitionToState(BalanceState::Balancing);
+        // Reset initialization counters
+        status.init_samples = 0;
+        status.is_first_reading = true;
+        
+        // Transition to initializing state first (safer)
+        TransitionToState(BalanceState::Initializing);
         
         return Platform::Status::OK;
     }

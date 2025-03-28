@@ -196,6 +196,20 @@ directories:
 	@mkdir -p $(OUT_BIN)
 
 # Rules for compilation
+
+
+# FreeRTOS with size optimization
+$(OBJDIR)/lib/FreeRTOS/%.o: $(LIB_DIR)/FreeRTOS/%.c | directories
+	$(make-dir)
+	@echo "Compiling FreeRTOS with optimization $<"
+	@$(CC) $(COMMON_FLAGS:-O0=-Os) -c $< -o $@
+
+# SEGGER with size optimization
+$(OBJDIR)/lib/SEGGER/%.o: $(LIB_DIR)/SEGGER/%.c | directories
+	$(make-dir)
+	@echo "Compiling SEGGER with optimization $<"
+	@$(CC) $(COMMON_FLAGS:-O0=-Os) -c $< -o $@
+
 $(OBJDIR)/%.o: %.c | directories
 	$(make-dir)
 	@echo "Compiling $<"
@@ -317,3 +331,57 @@ print-sources:
 	@echo "C sources: $(C_SRCS)"
 	@echo "C++ sources: $(CPP_SRCS)"
 	@echo "ASM sources: $(ASM_SRCS)"
+
+ELF_FILE=$(find out/bin -name "*.elf" | sort | tail -n1)
+
+analyze-size: $(OUT_BIN)/$(PROJ_NAME).elf
+	@echo "===== Largest Functions ====="
+	@arm-none-eabi-nm --print-size --size-sort --radix=d $< | grep -v " [a-z] " | tail -n 50
+	@echo "\n===== Section Sizes ====="
+	@arm-none-eabi-size -A -d $(OUT_BIN)/$(PROJ_NAME).elf
+
+analyze-components:
+	@echo "===== Component Size Analysis ====="
+	@echo "Hardware Abstraction Layer:"
+	@find $(OBJDIR)/src/hardware_abstraction -name "*.o" -exec $(SIZE) {} \; | \
+		awk '{text += $$1; data += $$2; bss += $$3} END {printf "  Text: %d bytes, Data: %d bytes, BSS: %d bytes\n", text, data, bss}'
+	@echo "Drivers:"
+	@find $(OBJDIR)/src/drivers -name "*.o" -exec $(SIZE) {} \; | \
+		awk '{text += $$1; data += $$2; bss += $$3} END {printf "  Text: %d bytes, Data: %d bytes, BSS: %d bytes\n", text, data, bss}'
+	@echo "Middleware:"
+	@find $(OBJDIR)/src/middleware -name "*.o" -exec $(SIZE) {} \; | \
+		awk '{text += $$1; data += $$2; bss += $$3} END {printf "  Text: %d bytes, Data: %d bytes, BSS: %d bytes\n", text, data, bss}'
+	@echo "Application:"
+	@find $(OBJDIR)/src/application -name "*.o" -exec $(SIZE) {} \; | \
+		awk '{text += $$1; data += $$2; bss += $$3} END {printf "  Text: %d bytes, Data: %d bytes, BSS: %d bytes\n", text, data, bss}'
+	@echo "FreeRTOS:"
+	@find $(OBJDIR)/lib/FreeRTOS -name "*.o" -exec $(SIZE) {} \; | \
+		awk '{text += $$1; data += $$2; bss += $$3} END {printf "  Text: %d bytes, Data: %d bytes, BSS: %d bytes\n", text, data, bss}'
+	@echo "SEGGER:"
+	@find $(OBJDIR)/lib/SEGGER -name "*.o" -exec $(SIZE) {} \; | \
+		awk '{text += $$1; data += $$2; bss += $$3} END {printf "  Text: %d bytes, Data: %d bytes, BSS: %d bytes\n", text, data, bss}'
+
+# Detailed analysis by file
+analyze-files:
+	@echo "===== File Size Analysis ====="
+	@find $(OBJDIR) -name "*.o" -exec sh -c '$(SIZE) {} | tail -n 1 | awk "{print \$$1+\$$2 \" bytes: {}\"}"' \; | sort -nr | head -n 30
+
+# Simple analysis for largest object files
+largest-objects:
+	@echo "===== Largest Object Files ====="
+	@find $(OBJDIR) -name "*.o" -type f -exec du -h {} \; | sort -hr | head -n 20
+
+# Generate a map file and analyze it
+map-analysis: $(OUT_BIN)/$(PROJ_NAME).elf
+	@echo "===== Map File Analysis ====="
+	@awk '/^\.text/ {text += $$3} /^\.data/ {data += $$3} /^\.bss/ {bss += $$3} END {printf "Text: %d bytes, Data: %d bytes, BSS: %d bytes\n", text, data, bss}' $(OUTPUT_DIR)/$(PROJ_NAME).map
+
+# Function count analysis
+function-count:
+	@echo "===== Function Count by Component ====="
+	@echo "Hardware Abstraction Layer: `arm-none-eabi-nm $(OUT_BIN)/$(PROJ_NAME).elf | grep -c 'hardware_abstraction'`"
+	@echo "Drivers: `arm-none-eabi-nm $(OUT_BIN)/$(PROJ_NAME).elf | grep -c 'drivers'`"
+	@echo "Middleware: `arm-none-eabi-nm $(OUT_BIN)/$(PROJ_NAME).elf | grep -c 'middleware'`"
+	@echo "Application: `arm-none-eabi-nm $(OUT_BIN)/$(PROJ_NAME).elf | grep -c 'application'`"
+	@echo "FreeRTOS: `arm-none-eabi-nm $(OUT_BIN)/$(PROJ_NAME).elf | grep -c 'FreeRTOS'`"
+	@echo "SEGGER: `arm-none-eabi-nm $(OUT_BIN)/$(PROJ_NAME).elf | grep -c 'SEGGER'`"

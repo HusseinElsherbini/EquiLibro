@@ -73,6 +73,7 @@ namespace MPU6050Reg {
 enum MPU6050Event {
     MPU6050_EVENT_DATA_READY = 0,    // New sensor data is available
     MPU6050_EVENT_DATA_AVAILABLE,    // Data transfer complete
+    MPU6050_SENSOR_DATA_AVAILABLE,   // Sensor Data avalibale
     MPU6050_EVENT_MOTION_DETECTED,   // Motion detection triggered
     MPU6050_EVENT_FIFO_OVERFLOW,     // FIFO buffer overflow
     MPU6050_EVENT_ERROR,             // Error occurred
@@ -106,6 +107,14 @@ constexpr uint32_t MPU6050_CTRL_SET_ACCEL_OFFSETS = 0x2018;
 constexpr uint32_t MPU6050_CTRL_GET_ACCEL_OFFSETS = 0x2019;
 constexpr uint32_t MPU6050_CTRL_RESET_OFFSETS = 0x201A;
 constexpr uint32_t MPU6050_CTRL_CALIBRATE_ITERATIVE = 0x201B;
+
+enum class OperationType {
+    None,
+    SensorDataRead,      // Reading sensor data
+    RegisterConfig,      // Configuring a register
+    CalibrationOp,       // Calibration operation
+    DeviceCheck          // Device identification/status check
+};
 
 typedef enum {
     MPU6050_MODE_MANUAL,   // Application triggers readings explicitly
@@ -183,6 +192,8 @@ private:
     // Device state 
     DeviceState state;
     
+    volatile OperationType current_operation = OperationType::None;
+
     // Default I2C address for MPU6050
     static constexpr uint8_t MPU6050_DEFAULT_ADDRESS = 0x68;
     

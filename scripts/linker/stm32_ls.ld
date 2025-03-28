@@ -3,7 +3,7 @@ ENTRY(Reset_Handler)
 MEMORY
 {
   FLASH(rx):ORIGIN =0x08000000,LENGTH =240K  /* First 240KB for code */
-  USER_DATA(r):ORIGIN =0x0803C000,LENGTH =16K  /* Last 16KB of sector 5 for user data */
+  USER_DATA(rw):ORIGIN =0x08020000,LENGTH =16K  /* Last 16KB of sector 5 for user data */
   SRAM(rwx):ORIGIN =0x20000000,LENGTH =64K
 }
 
