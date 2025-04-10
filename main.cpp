@@ -13,7 +13,57 @@
 #include <memory>
 #include "sbr_app_tasks.hpp"
 #include "storage_manager.hpp"
+#include "SEGGER_RTT.h"
 
+#ifndef __DSB
+  #define __DSB() __asm__ volatile ("dsb sy" ::: "memory")
+#endif
+
+#ifndef __ISB
+  #define __ISB() __asm__ volatile ("isb sy" ::: "memory")
+#endif
+
+void disable_write_buffer_local_defs(void) {
+    // 1. Define the absolute address of the ACTLR register locally
+    const uint32_t actlr_address = 0xE000E008UL;
+
+    // 2. Define the bit mask for the DISDEFWBUF bit (bit 1) locally
+    const uint32_t actlr_disdefwbuf_bit = (1UL << 1);
+
+    // 3. Create the volatile pointer locally, casting the address
+    volatile uint32_t * const pACTLR = (volatile uint32_t *)actlr_address;
+
+    // 4. Perform the read-modify-write operation
+    *pACTLR |= actlr_disdefwbuf_bit;
+
+    // 5. Memory barriers (compiler intrinsics)
+    __DSB(); // Data Synchronization Barrier
+    __ISB(); // Instruction Synchronization Barrier
+}
+
+/**
+ * @brief Enables the Write Buffer using direct memory access.
+ *        All definitions are local to the function.
+ * @note Modifying ACTLR can impact performance and behavior. Use with caution.
+ */
+void enable_write_buffer_local_defs(void) {
+
+    // 1. Define the absolute address of the ACTLR register locally
+    const uint32_t actlr_address = 0xE000E008UL;
+
+    // 2. Define the bit mask for the DISDEFWBUF bit (bit 1) locally
+    const uint32_t actlr_disdefwbuf_bit = (1UL << 1);
+
+    // 3. Create the volatile pointer locally, casting the address
+    volatile uint32_t * const pACTLR = (volatile uint32_t *)actlr_address;
+
+    // 4. Perform the read-modify-write operation
+    *pACTLR &= ~actlr_disdefwbuf_bit;
+
+    // 5. Memory barriers (compiler intrinsics)
+    __DSB(); // Data Synchronization Barrier
+    __ISB(); // Instruction Synchronization Barrier
+}
 
 // System initialization function
 Platform::Status SystemInit() {
@@ -228,6 +278,8 @@ Platform::Status InitBalanceRobotApp() {
 }
 
 int main() {
+
+    disable_write_buffer_local_defs(); // Disable write buffer for flash access
     // Initialize the system
     Platform::Status status = SystemInit();
     if (status != Platform::Status::OK) {
@@ -236,6 +288,7 @@ int main() {
             // If system init fails, we can't proceed
         }
     }
+    SEGGER_RTT_Init();
     // Initialize the self-balancing robot application
     status = InitBalanceRobotApp();
     if (status != Platform::Status::OK) {
@@ -248,15 +301,6 @@ int main() {
     // Get the balance robot application instance
     // The singleton is already initialized in InitBalanceRobotApp
     APP::BalanceRobotApp& balance_app = APP::BalanceRobotApp::GetInstance();
-
-    // Check calibration 
-    status = balance_app.CheckCalibration();
-    if (status != Platform::Status::OK) {
-        // Error handling - could blink an LED or log error
-        while (1) {
-            // If calibration fails, we can't proceed
-        }
-    }
 
     // Create and start tasks
     balance_app.InitializeTasks();

@@ -24,7 +24,7 @@ constexpr uint32_t MGM_TASK_PERIOD_MS = 100;  // 10Hz display updates
 constexpr uint32_t LOG_TASK_PERIOD_MS = 10;   // 100Hz Logging task
 
 // Stack sizes
-constexpr uint32_t BALANCING_TASK_STACK_SIZE = (configMINIMAL_STACK_SIZE * 2);  // Larger for filter calculations
+constexpr uint32_t BALANCING_TASK_STACK_SIZE = (configMINIMAL_STACK_SIZE * 20);  // Larger for filter calculations
 constexpr uint32_t RC_TASK_STACK_SIZE = configMINIMAL_STACK_SIZE;
 constexpr uint32_t MGM_TASK_STACK_SIZE = configMINIMAL_STACK_SIZE;
 constexpr uint32_t MONITOR_TASK_STACK_SIZE = (configMINIMAL_STACK_SIZE * 2);

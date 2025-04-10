@@ -11,6 +11,61 @@
 namespace Drivers {
 namespace Sensors {
 
+    // Add to your MPU6050.hpp file
+struct MPU6050Configuration {
+    // Power Management
+    bool device_reset;
+    bool sleep;
+    bool cycle;
+    bool temp_dis;
+    uint8_t clock_source;
+    
+    // Gyroscope Configuration
+    uint8_t gyro_self_test;
+    uint8_t gyro_range;
+    float gyro_scale_factor;
+    
+    // Accelerometer Configuration
+    uint8_t accel_self_test;
+    uint8_t accel_range;
+    float accel_scale_factor;
+    
+    // Digital Low Pass Filter Configuration
+    uint8_t ext_sync;
+    uint8_t dlpf_config;
+    
+    // Sample Rate Configuration
+    uint8_t sample_rate_div;
+    
+    // Interrupt Configuration
+    bool interrupt_data_rdy_en;
+    bool interrupt_fifo_oflow_en;
+    
+    // INT Pin Configuration
+    bool int_level;
+    bool int_open;
+    bool latch_int_en;
+    bool int_rd_clear;
+    bool fsync_int_level;
+    bool fsync_int_en;
+    bool i2c_bypass_en;
+    
+    // User Control
+    bool fifo_en;
+    bool i2c_mst_en;
+    bool i2c_if_dis;
+    bool fifo_reset;
+    bool i2c_mst_reset;
+    bool sig_cond_reset;
+    
+    // Offsets
+    int16_t gyro_x_offset;
+    int16_t gyro_y_offset;
+    int16_t gyro_z_offset;
+    int16_t accel_x_offset;
+    int16_t accel_y_offset;
+    int16_t accel_z_offset;
+};
 /**
  * MPU6050 Register Address Map
  */
@@ -369,6 +424,8 @@ public:
     void HandleI2CTransferComplete();
     
     MPU6050Data ProcessIMURawData();
+    Platform::Status Configure(const MPU6050Configuration& config);
+    Platform::Status ReadConfiguration(MPU6050Configuration* config_out);
 
     void TriggerCallback(MPU6050Event event);
     /**

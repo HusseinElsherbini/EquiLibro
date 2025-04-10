@@ -3,12 +3,10 @@ ENTRY(Reset_Handler)
 MEMORY
 {
   FLASH(rx):ORIGIN =0x08000000,LENGTH =240K  /* First 240KB for code */
-  USER_DATA(rw):ORIGIN =0x08020000,LENGTH =16K  /* Last 16KB of sector 5 for user data */
   SRAM(rwx):ORIGIN =0x20000000,LENGTH =64K
 }
 
-_Min_Heap_Size = 0x4000;  /* 16KB minimum guarantee for heap */
-_Min_Stack_Size = 0x2000; /* 8KB minimum guarantee for stack */
+_Min_Stack_Size = 0x4000; /* 16KB minimum guarantee for stack */
 
 SECTIONS
 {
@@ -67,16 +65,6 @@ SECTIONS
 	__end__ = .;
   }> SRAM
 
-  .heap :
-  {
-      . = ALIGN(8);
-      PROVIDE ( end = . );
-      PROVIDE ( _end = . );
-      . = . + _Min_Heap_Size;
-      PROVIDE ( _heap_end = . );
-      . = ALIGN(8);
-  } >SRAM
-
   .stack :
   {
       . = ALIGN(8);
@@ -84,10 +72,5 @@ SECTIONS
       . = ALIGN(8);
       PROVIDE( _estack = . );
   } >SRAM
-  .user_data :
-  {
-    . = ALIGN(4);
-    *(.user_data)
-    . = ALIGN(4);
-  } > USER_DATA
+
 }

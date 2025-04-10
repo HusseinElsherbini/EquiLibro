@@ -1,7 +1,7 @@
 ﻿// sbr_app_tasks.cpp
 #include "sbr_app.hpp"
 #include "sbr_app_tasks.hpp"
-
+#include "SEGGER_RTT.h"
 namespace APP {
 
 Platform::Status BalanceRobotApp::InitializeTasks() {
@@ -111,39 +111,32 @@ void vBalancingTask(void* params) {
     Platform::GPIO::GpioInterface *test_gpio = &Platform::GPIO::GpioInterface::GetInstance();
 
     // Register this task's handle so IMU callbacks can notify it
-    app->RegisterBalancingTask(xTaskGetCurrentTaskHandle());
+    //app->RegisterBalancingTask(xTaskGetCurrentTaskHandle());
     
-    // Initialize counters for monitoring
-    uint32_t successful_notifications = 0;
-    uint32_t timeout_count = 0;
     TickType_t xLastWakeTime = xTaskGetTickCount();
+    // get high water mark for stack usage
+    //UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // Get stack high water mark for this task
 
     while (true) {
         // Wait for notification with timeout
-        uint32_t notificationValue = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(IMU_I2C_TIMEOUT_TICKS));
+        
+        uint32_t notificationValue = ulTaskNotifyTake(pdTRUE, IMU_I2C_TIMEOUT_TICKS);
         
         if (notificationValue > 0) {
-            // We received a proper notification from the IMU data callback
-            successful_notifications++;
-            
+           
             // Process the balance application with the latest IMU data
             //app->Process(&processType);
-            
+            /*
+            float angle = app->status.imu_data.filtered_angle;
+            int32_t whole = (int32_t)angle;
+            int32_t frac = abs((int32_t)((angle - whole) * 1000)); // Get absolute value of fractional part
+            SEGGER_RTT_printf(0, "%d.%03d\n", whole, frac);*/
             // Toggle LED to indicate successful data processing
-            test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
+            //
         } else {
-            // Timeout occurred - no notification received within the specified time
-            timeout_count++;
-            
-            // Handle timeout - maybe check if IMU is still responding
-            if (timeout_count > 10) {  // After several consecutive timeouts
-                // Log error or attempt recovery
-                // app->CheckIMUStatus();
-                timeout_count = 0;  // Reset counter after attempting recovery
-            }
-            
+            test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
             // You might want to toggle a different pin to indicate timeout
-            test_gpio->TogglePin(Platform::GPIO::Port::PORTB, 13);
+            //test_gpio->TogglePin(Platform::GPIO::Port::PORTB, 13);
         }
         
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(BALANCING_TASK_PERIOD_MS));  

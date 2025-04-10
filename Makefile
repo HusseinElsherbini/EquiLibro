@@ -21,7 +21,7 @@ SIZE := arm-none-eabi-size
 MACH := cortex-m4
 
 # Optimization and debug flags
-OPT_FLAGS := -Os
+OPT_FLAGS := -O0
 DBG_FLAGS := -g3
 
 # Warning levels - separate from core compilation
@@ -196,19 +196,6 @@ directories:
 	@mkdir -p $(OUT_BIN)
 
 # Rules for compilation
-
-
-# FreeRTOS with size optimization
-$(OBJDIR)/lib/FreeRTOS/%.o: $(LIB_DIR)/FreeRTOS/%.c | directories
-	$(make-dir)
-	@echo "Compiling FreeRTOS with optimization $<"
-	@$(CC) $(COMMON_FLAGS:-O0=-Os) -c $< -o $@
-
-# SEGGER with size optimization
-$(OBJDIR)/lib/SEGGER/%.o: $(LIB_DIR)/SEGGER/%.c | directories
-	$(make-dir)
-	@echo "Compiling SEGGER with optimization $<"
-	@$(CC) $(COMMON_FLAGS:-O0=-Os) -c $< -o $@
 
 $(OBJDIR)/%.o: %.c | directories
 	$(make-dir)

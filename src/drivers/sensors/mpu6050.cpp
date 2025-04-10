@@ -10,6 +10,7 @@
 #include <memory>
 #include <cmath>
 #include "platform.hpp"
+#include "middleware/system_services/storage_manager.hpp"
 namespace Drivers {
 namespace Sensors {
 
@@ -108,23 +109,27 @@ namespace Sensors {
     }
     
     MPU6050Data MPU6050::ProcessIMURawData() {
-        // Calculate the filtered angle using your complementary filter logic
-        float accel_angle = atan2f(sensor_data.accel_x_g, 
-                              sqrtf(sensor_data.accel_y_g * sensor_data.accel_y_g + 
-                                    sensor_data.accel_z_g * sensor_data.accel_z_g)) * 180.0f / Platform::PI;
+        // Calculate angle from accelerometer data using the same approach as old code
+        // Note: Make sure these axis mappings are correct for your hardware orientation
+        float acc_angle_y = (180.0f/Platform::PI) * atan(sensor_data.accel_y_g / 
+                          sqrt(pow(sensor_data.accel_x_g, 2) + pow(sensor_data.accel_z_g, 2)));
         
+        // Calculate angular velocity from gyro data (similar to old 131.0f scaling)
+        float angular_velocity = sensor_data.gyro_y_dps;  // Assuming this is already properly scaled
         
-        // Timestamp might need adjustment for proper timing
+        // Timestamp for proper timing
         uint64_t now = timing_service->GetMicroseconds();
         static uint64_t last_time = now;
-        float dt = (now - last_time) / 1000000.0f;
+        float timeStep = (now - last_time) / 1000.0f;  // Convert to milliseconds like old code
         last_time = now;
         
-        if (sensor_data.timestamp_ms == 0) {
-            sensor_data.filtered_angle = accel_angle;
-        } else {
-            sensor_data.filtered_angle = 0.98f * (sensor_data.filtered_angle + sensor_data.gyro_x_dps * dt) + 0.02f * accel_angle;
-        } 
+        // Update gyro angle using integration (matches old code approach)
+        static float gyro_angle_y = acc_angle_y;  // Initialize on first call
+        gyro_angle_y = gyro_angle_y + (timeStep/1000.0f) * angular_velocity;
+        
+        // Apply complementary filter with 0.96/0.04 ratio instead of 0.02/0.98
+        sensor_data.filtered_angle = (0.04f * gyro_angle_y + 0.96f * acc_angle_y);
+        
         return sensor_data;
     }
     /**
@@ -333,6 +338,9 @@ namespace Sensors {
         
         // Clear reset bit and set clock source
         status = SetClockSource(config.clock_source);
+
+        timing_service->DelayMilliseconds(100);
+
         if (status != Platform::Status::OK) {
             return status;
         }
@@ -423,13 +431,12 @@ namespace Sensors {
      * @return Status code indicating success or failure
      */
     Platform::Status MPU6050::Init(void* config_ptr) {
-
         // Copy configuration if provided
         if (config_ptr) {
             config = *static_cast<MPU6050Config*>(config_ptr);
         }
-
-        Platform::Status status;
+        
+        // Get I2C interface
         this->i2c_interface = &Platform::I2C::I2CInterface::GetInstance(config.i2c_config.i2c_instance);
         // Check if we have a valid I2C interface
         if (!this->i2c_interface) {
@@ -437,10 +444,71 @@ namespace Sensors {
             return Platform::Status::ERROR;
         }
         
-        // check if i2c interface is initialized 
-        if(!this->i2c_interface->IsInitialized()){
+        // Check if I2C interface is initialized
+        if (!this->i2c_interface->IsInitialized()) {
             return Platform::Status::DEPENDENCY_NOT_INITIALIZED;
         }
+        
+        // Create a configuration structure with standard initialization values
+        MPU6050Configuration init_config = {
+            .device_reset = true,        // Reset device first
+            .sleep = false,              // Disable sleep mode
+            .cycle = false,              // No cycle mode
+            .temp_dis = false,           // Enable temperature sensor
+            .clock_source = 1,           // PLL with X-axis gyro reference
+            
+            .gyro_self_test = 0,         // No self-test
+            .gyro_range = config.gyro_range,
+            
+            .accel_self_test = 0,        // No self-test
+            .accel_range = config.accel_range,
+            
+            .ext_sync = 0,               // No external sync
+            .dlpf_config = config.dlpf_mode,
+            
+            .sample_rate_div = config.sample_rate_div,
+            
+            .interrupt_data_rdy_en = config.interrupt_enabled,
+            .interrupt_fifo_oflow_en = false,
+            
+            .int_level = false,          // Active high interrupt
+            .int_open = false,           // Push-pull output
+            .latch_int_en = false,       // Interrupt pulse, not latched
+            .int_rd_clear = true,        // Clear interrupt on read
+            .fsync_int_level = false,
+            .fsync_int_en = false,
+            .i2c_bypass_en = false,
+            
+            .fifo_en = config.use_fifo,
+            .i2c_mst_en = false,
+            .i2c_if_dis = false,
+            .fifo_reset = false,
+            .i2c_mst_reset = false,
+            .sig_cond_reset = false,
+            
+            // Using predefined offsets or zeros
+            .gyro_x_offset = 51,
+            .gyro_y_offset = -14,
+            .gyro_z_offset = 17,
+            .accel_x_offset = -274,
+            .accel_y_offset = 2636,
+            .accel_z_offset = 1184
+        };
+        
+        // Apply the configuration
+        Platform::Status status = Configure(init_config);
+        if (status != Platform::Status::OK) {
+            state = DeviceState::Error;
+            return status;
+        }
+        
+        // Register I2C transfer complete callback
+        i2c_interface->RegisterCallback(
+            static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete),
+            I2CTransferCompleteHandler,
+            this
+        );
+        
         // Configure data ready interrupt if enabled
         if (config.enable_data_ready_interrupt) {
             // Configure GPIO pin for interrupt
@@ -451,136 +519,31 @@ namespace Sensors {
                 .port = config.data_ready_port,
                 .pin = config.data_ready_pin,
                 .mode = Platform::GPIO::Mode::Input,
-                .pull = Platform::GPIO::Pull::PullDown, // Typically INT is active high
+                .pull = Platform::GPIO::Pull::PullDown,
             };
-            gpio.ConfigurePin(pin_config);
+            status = gpio.ConfigurePin(pin_config);
+            if (status != Platform::Status::OK) {
+                state = DeviceState::Error;
+                return status;
+            }
             
             // Configure and enable interrupt
-            gpio.ConfigureInterrupt(config.data_ready_port, config.data_ready_pin, 
+            status = gpio.ConfigureInterrupt(config.data_ready_port, config.data_ready_pin, 
                                 Platform::GPIO::InterruptTrigger::Rising);
+            if (status != Platform::Status::OK) {
+                state = DeviceState::Error;
+                return status;
+            }
             
             // Register callback
             gpio.RegisterInterruptCallback(config.data_ready_port, config.data_ready_pin,
                                         &DataReadyInterruptHandler, this);
             
-            // Disable on startup
             gpio.EnableInterrupt(config.data_ready_port, config.data_ready_pin, false);
-            
-            // save sensor data acquisition mode (Manual or Auto)
+
+            // Save sensor data acquisition mode
             this->current_mode = config.operating_mode;
         }
-        // Reset device to ensure clean state
-        status = ResetDevice();
-        if (status != Platform::Status::OK) {
-            state = DeviceState::Error;
-            return status;
-        }
-        
-        // Wait for device to stabilize after reset
-        timing_service->DelayMilliseconds(100);
-        
-        // Verify device identity
-        status = VerifyDeviceID();
-        if (status != Platform::Status::OK) {
-            state = DeviceState::Error;
-            return status;
-        }
-        
-        // Wake up the device (clear sleep bit)
-        status = WriteRegister(MPU6050Reg::PWR_MGMT_1, config.clock_source);
-        if (status != Platform::Status::OK) {
-            state = DeviceState::Error;
-            return status;
-        }
-        
-        // Configure device
-        status = SetGyroRange(config.gyro_range);
-        if (status != Platform::Status::OK) {
-            state = DeviceState::Error;
-            return status;
-        }
-        
-        status = SetAccelRange(config.accel_range);
-        if (status != Platform::Status::OK) {
-            state = DeviceState::Error;
-            return status;
-        }
-        
-        status = SetDLPFMode(config.dlpf_mode);
-        if (status != Platform::Status::OK) {
-            state = DeviceState::Error;
-            return status;
-        }
-        
-        status = SetSampleRateDiv(config.sample_rate_div);
-        if (status != Platform::Status::OK) {
-            state = DeviceState::Error;
-            return status;
-        }
-        
-        // Configure FIFO if enabled
-        if (config.use_fifo) {
-            // Enable FIFO for accelerometer, temperature, and gyroscope
-            status = WriteRegister(MPU6050Reg::FIFO_EN, 0x78);
-            if (status != Platform::Status::OK) {
-                state = DeviceState::Error;
-                return status;
-            }
-            
-            // Enable FIFO in user control register
-            status = WriteRegister(MPU6050Reg::USER_CTRL, 0x40);
-            if (status != Platform::Status::OK) {
-                state = DeviceState::Error;
-                return status;
-            }
-        }
-        
-        // Configure interrupts if enabled
-        if (config.interrupt_enabled) {
-            // Enable data ready interrupt
-            status = WriteRegister(MPU6050Reg::INT_ENABLE, 0x01);
-            if (status != Platform::Status::OK) {
-                state = DeviceState::Error;
-                return status;
-            }
-            
-            // Configure interrupt pin (active high, push-pull, etc.)
-            status = WriteRegister(MPU6050Reg::INT_PIN_CFG, 0x00);
-            if (status != Platform::Status::OK) {
-                state = DeviceState::Error;
-                return status;
-            }
-        }
-        
-        // Configure motion detection if enabled
-        if (config.enable_motion_detect) {
-            // Set motion threshold
-            status = WriteRegister(MPU6050Reg::ACCEL_CONFIG, 0x01); // Enable accel hardware intelligence
-            if (status != Platform::Status::OK) {
-                state = DeviceState::Error;
-                return status;
-            }
-            
-            status = WriteRegister(0x1F, config.motion_threshold); // Motion threshold register
-            if (status != Platform::Status::OK) {
-                state = DeviceState::Error;
-                return status;
-            }
-            
-            // Enable motion interrupt
-            status = WriteRegister(MPU6050Reg::INT_ENABLE, 0x40); // Motion interrupt
-            if (status != Platform::Status::OK) {
-                state = DeviceState::Error;
-                return status;
-            }
-        }
-        
-        // Register I2C transfer complete callback
-        i2c_interface->RegisterCallback(
-            static_cast<uint32_t>(Platform::I2C::I2CEvent::TransferComplete),
-            I2CTransferCompleteHandler,
-            this
-        );
         
         // Update state
         state = DeviceState::Initialized;
@@ -1359,14 +1322,22 @@ namespace Sensors {
 
     // Gyroscope offset functions
     Platform::Status MPU6050::SetGyroXOffset(int16_t offset) {
-        // Write high byte
-        Platform::Status status = WriteRegister(MPU6050Reg::XG_OFFS_USRH, static_cast<uint8_t>((offset >> 8) & 0xFF));
-        if (status != Platform::Status::OK) {
-            return status;
-        }
+        uint8_t data[2];
         
-        // Write low byte
-        status = WriteRegister(MPU6050Reg::XG_OFFS_USRL, static_cast<uint8_t>(offset & 0xFF));
+        // Prepare data
+        data[0] = static_cast<uint8_t>((offset >> 8) & 0xFF); // High byte
+        data[1] = static_cast<uint8_t>(offset & 0xFF);        // Low byte
+        
+        // Write both bytes in a single transaction
+        Platform::Status status = i2c_interface->MemoryWrite(
+            config.device_address,
+            MPU6050Reg::XG_OFFS_USRH,
+            1,
+            data,
+            2,
+            config.i2c_timeout_ms
+        );
+        
         if (status != Platform::Status::OK) {
             return status;
         }
@@ -1376,16 +1347,24 @@ namespace Sensors {
         
         return Platform::Status::OK;
     }
-
+    
     Platform::Status MPU6050::SetGyroYOffset(int16_t offset) {
-        // Write high byte
-        Platform::Status status = WriteRegister(MPU6050Reg::YG_OFFS_USRH, static_cast<uint8_t>((offset >> 8) & 0xFF));
-        if (status != Platform::Status::OK) {
-            return status;
-        }
+        uint8_t data[2];
         
-        // Write low byte
-        status = WriteRegister(MPU6050Reg::YG_OFFS_USRL, static_cast<uint8_t>(offset & 0xFF));
+        // Prepare data
+        data[0] = static_cast<uint8_t>((offset >> 8) & 0xFF); // High byte
+        data[1] = static_cast<uint8_t>(offset & 0xFF);        // Low byte
+        
+        // Write both bytes in a single transaction
+        Platform::Status status = i2c_interface->MemoryWrite(
+            config.device_address,
+            MPU6050Reg::YG_OFFS_USRH,
+            1,
+            data,
+            2,
+            config.i2c_timeout_ms
+        );
+        
         if (status != Platform::Status::OK) {
             return status;
         }
@@ -1395,16 +1374,24 @@ namespace Sensors {
         
         return Platform::Status::OK;
     }
-
+    
     Platform::Status MPU6050::SetGyroZOffset(int16_t offset) {
-        // Write high byte
-        Platform::Status status = WriteRegister(MPU6050Reg::ZG_OFFS_USRH, static_cast<uint8_t>((offset >> 8) & 0xFF));
-        if (status != Platform::Status::OK) {
-            return status;
-        }
+        uint8_t data[2];
         
-        // Write low byte
-        status = WriteRegister(MPU6050Reg::ZG_OFFS_USRL, static_cast<uint8_t>(offset & 0xFF));
+        // Prepare data
+        data[0] = static_cast<uint8_t>((offset >> 8) & 0xFF); // High byte
+        data[1] = static_cast<uint8_t>(offset & 0xFF);        // Low byte
+        
+        // Write both bytes in a single transaction
+        Platform::Status status = i2c_interface->MemoryWrite(
+            config.device_address,
+            MPU6050Reg::ZG_OFFS_USRH,
+            1,
+            data,
+            2,
+            config.i2c_timeout_ms
+        );
+        
         if (status != Platform::Status::OK) {
             return status;
         }
@@ -1414,7 +1401,7 @@ namespace Sensors {
         
         return Platform::Status::OK;
     }
-
+    
     Platform::Status MPU6050::SetGyroOffsets(int16_t x_offset, int16_t y_offset, int16_t z_offset) {
         Platform::Status status;
         
@@ -1435,7 +1422,6 @@ namespace Sensors {
         
         return Platform::Status::OK;
     }
-
     Platform::Status MPU6050::GetGyroXOffset(int16_t* offset) {
         if (offset == nullptr) {
             return Platform::Status::INVALID_PARAM;
@@ -1536,72 +1522,64 @@ namespace Sensors {
         return Platform::Status::OK;
     }
 
-    // Accelerometer offset functions
-
     Platform::Status MPU6050::SetAccelXOffset(int16_t offset) {
-        // For accelerometer, bit 0 of the low byte must be 0 (reserved)
-        offset &= 0xFFFE;
+        uint8_t data[2];
         
-        // Write high byte
-        Platform::Status status = WriteRegister(MPU6050Reg::XA_OFFS_H, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        // Read current registers to preserve bit 0
+        Platform::Status status = ReadRegisters(MPU6050Reg::XA_OFFS_H, data, 2);
         if (status != Platform::Status::OK) {
             return status;
         }
         
-        // Write low byte
-        status = WriteRegister(MPU6050Reg::XA_OFFS_L, static_cast<uint8_t>(offset & 0xFF));
-        if (status != Platform::Status::OK) {
-            return status;
-        }
+        // Preserve bit 0 from the original register
+        uint8_t preserved_bit = data[1] & 0x01;
         
-        // Update calibration data
-        calibration.accel_x_offset = offset;
+        // Prepare new data
+        data[0] = static_cast<uint8_t>((offset >> 8) & 0xFF);
+        data[1] = static_cast<uint8_t>((offset & 0xFE) | preserved_bit);
         
-        return Platform::Status::OK;
+        // Write both bytes in a single transaction
+        return i2c_interface->MemoryWrite(config.device_address, MPU6050Reg::XA_OFFS_H, 1, data, 2, config.i2c_timeout_ms);
     }
 
     Platform::Status MPU6050::SetAccelYOffset(int16_t offset) {
-        // For accelerometer, bit 0 of the low byte must be 0 (reserved)
-        offset &= 0xFFFE;
+        uint8_t data[2];
         
-        // Write high byte
-        Platform::Status status = WriteRegister(MPU6050Reg::YA_OFFS_H, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        // Read current registers to preserve bit 0
+        Platform::Status status = ReadRegisters(MPU6050Reg::YA_OFFS_H, data, 2);
         if (status != Platform::Status::OK) {
             return status;
         }
         
-        // Write low byte
-        status = WriteRegister(MPU6050Reg::YA_OFFS_L, static_cast<uint8_t>(offset & 0xFF));
-        if (status != Platform::Status::OK) {
-            return status;
-        }
+        // Preserve bit 0 from the original register
+        uint8_t preserved_bit = data[1] & 0x01;
         
-        // Update calibration data
-        calibration.accel_y_offset = offset;
+        // Prepare new data
+        data[0] = static_cast<uint8_t>((offset >> 8) & 0xFF);
+        data[1] = static_cast<uint8_t>((offset & 0xFE) | preserved_bit);
         
-        return Platform::Status::OK;
+        // Write both bytes in a single transaction
+        return i2c_interface->MemoryWrite(config.device_address, MPU6050Reg::YA_OFFS_H, 1, data, 2, config.i2c_timeout_ms);
     }
 
     Platform::Status MPU6050::SetAccelZOffset(int16_t offset) {
-        // For accelerometer, bit 0 of the low byte must be 0 (reserved)
-        offset &= 0xFFFE;
+        uint8_t data[2];
         
-        // Write high byte
-        Platform::Status status = WriteRegister(MPU6050Reg::ZA_OFFS_H, static_cast<uint8_t>((offset >> 8) & 0xFF));
+        // Read current registers to preserve bit 0
+        Platform::Status status = ReadRegisters(MPU6050Reg::ZA_OFFS_H, data, 2);
         if (status != Platform::Status::OK) {
             return status;
         }
         
-        // Write low byte
-        status = WriteRegister(MPU6050Reg::ZA_OFFS_L, static_cast<uint8_t>(offset & 0xFF));
-        if (status != Platform::Status::OK) {
-            return status;
-        }
+        // Preserve bit 0 from the original register
+        uint8_t preserved_bit = data[1] & 0x01;
         
-        // Update calibration data
-        calibration.accel_z_offset = offset;
+        // Prepare new data
+        data[0] = static_cast<uint8_t>((offset >> 8) & 0xFF);
+        data[1] = static_cast<uint8_t>((offset & 0xFE) | preserved_bit);
         
-        return Platform::Status::OK;
+        // Write both bytes in a single transaction
+        return i2c_interface->MemoryWrite(config.device_address, MPU6050Reg::ZA_OFFS_H, 1, data, 2, config.i2c_timeout_ms);
     }
 
     Platform::Status MPU6050::SetAccelOffsets(int16_t x_offset, int16_t y_offset, int16_t z_offset) {
@@ -1758,11 +1736,7 @@ namespace Sensors {
      * @return Status code indicating success or failure
      */
     Platform::Status MPU6050::CalibrateIterative() {
-        // Check if initialized
-        if (state != DeviceState::Initialized) {
-            return Platform::Status::NOT_INITIALIZED;
-        }
-        
+
         // Parameters for calibration
         const int acc_deadzone = 8;     // Acceptable accelerometer error
         const int gyro_deadzone = 1;    // Acceptable gyroscope error
@@ -1907,6 +1881,312 @@ namespace Sensors {
         
         // If we get here, we've exceeded max_iterations without achieving calibration
         return Platform::Status::TIMEOUT;
+    }
+    Platform::Status MPU6050::Configure(const MPU6050Configuration& config) {
+        
+        Platform::Status status;
+        
+        // 1. Reset device if requested
+        if (config.device_reset) {
+            status = ResetDevice();
+            if (status != Platform::Status::OK) {
+                return status;
+            }
+            
+            // Wait for reset to complete
+            timing_service->DelayMilliseconds(100);
+        }
+        
+        // 2. Configure power management
+        uint8_t pwr_mgmt = 0;
+        if (config.sleep) pwr_mgmt |= (1 << 6);
+        if (config.cycle) pwr_mgmt |= (1 << 5);
+        if (config.temp_dis) pwr_mgmt |= (1 << 3);
+        pwr_mgmt |= (config.clock_source & 0x07);
+        
+        status = WriteRegister(MPU6050Reg::PWR_MGMT_1, pwr_mgmt);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 3. Configure gyroscope
+        uint8_t gyro_cfg = 0;
+        gyro_cfg |= ((config.gyro_self_test & 0x07) << 5);
+        gyro_cfg |= ((config.gyro_range & 0x03) << 3);
+        
+        status = WriteRegister(MPU6050Reg::GYRO_CONFIG, gyro_cfg);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 4. Configure accelerometer
+        uint8_t accel_cfg = 0;
+        accel_cfg |= ((config.accel_self_test & 0x07) << 5);
+        accel_cfg |= ((config.accel_range & 0x03) << 3);
+        
+        status = WriteRegister(MPU6050Reg::ACCEL_CONFIG, accel_cfg);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 5. Configure DLPF
+        uint8_t dlpf_cfg = 0;
+        dlpf_cfg |= ((config.ext_sync & 0x07) << 3);
+        dlpf_cfg |= (config.dlpf_config & 0x07);
+        
+        status = WriteRegister(MPU6050Reg::CONFIG, dlpf_cfg);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 6. Configure sample rate
+        status = WriteRegister(MPU6050Reg::SMPLRT_DIV, config.sample_rate_div);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 7. Configure INT pin behavior
+        uint8_t int_pin_cfg = 0;
+        if (config.int_level) int_pin_cfg |= (1 << 7);
+        if (config.int_open) int_pin_cfg |= (1 << 6);
+        if (config.latch_int_en) int_pin_cfg |= (1 << 5);
+        if (config.int_rd_clear) int_pin_cfg |= (1 << 4);
+        if (config.fsync_int_level) int_pin_cfg |= (1 << 3);
+        if (config.fsync_int_en) int_pin_cfg |= (1 << 2);
+        if (config.i2c_bypass_en) int_pin_cfg |= (1 << 1);
+        
+        status = WriteRegister(MPU6050Reg::INT_PIN_CFG, int_pin_cfg);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 8. Configure interrupts
+        uint8_t int_enable = 0;
+        if (config.interrupt_data_rdy_en) int_enable |= 0x01;
+        if (config.interrupt_fifo_oflow_en) int_enable |= (1 << 4);
+        
+        status = WriteRegister(MPU6050Reg::INT_ENABLE, int_enable);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 9. Configure user control register
+        uint8_t user_ctrl = 0;
+        if (config.fifo_en) user_ctrl |= (1 << 6);
+        if (config.i2c_mst_en) user_ctrl |= (1 << 5);
+        if (config.i2c_if_dis) user_ctrl |= (1 << 4);
+        if (config.fifo_reset) user_ctrl |= (1 << 2);
+        if (config.i2c_mst_reset) user_ctrl |= (1 << 1);
+        if (config.sig_cond_reset) user_ctrl |= 0x01;
+        
+        status = WriteRegister(MPU6050Reg::USER_CTRL, user_ctrl);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+
+        // 10. Set gyroscope offsets
+        status = SetGyroOffsets(config.gyro_x_offset, config.gyro_y_offset, config.gyro_z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 11. Set accelerometer offsets
+        status = SetAccelOffsets(config.accel_x_offset, config.accel_y_offset, config.accel_z_offset);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // 12. Update the scale factors based on the ranges
+        switch (config.gyro_range) {
+            case 0: // ±250°/s
+                gyro_scale_factor = 131.0f;
+                break;
+            case 1: // ±500°/s
+                gyro_scale_factor = 65.5f;
+                break;
+            case 2: // ±1000°/s
+                gyro_scale_factor = 32.8f;
+                break;
+            case 3: // ±2000°/s
+                gyro_scale_factor = 16.4f;
+                break;
+            default:
+                gyro_scale_factor = 131.0f; // Default
+        }
+        
+        switch (config.accel_range) {
+            case 0: // ±2g
+                accel_scale_factor = 16384.0f;
+                break;
+            case 1: // ±4g
+                accel_scale_factor = 8192.0f;
+                break;
+            case 2: // ±8g
+                accel_scale_factor = 4096.0f;
+                break;
+            case 3: // ±16g
+                accel_scale_factor = 2048.0f;
+                break;
+            default:
+                accel_scale_factor = 16384.0f; // Default
+        }
+        
+        // 13. Verify configuration by reading back registers (optional)
+        MPU6050Configuration verified_config;
+        status = ReadConfiguration(&verified_config);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        
+        // Check for critical mismatches
+        if (verified_config.accel_range != config.accel_range ||
+            verified_config.gyro_range != config.gyro_range ||
+            verified_config.sleep != config.sleep) {
+            return Platform::Status::ERROR; // Critical configuration mismatch
+        }
+        
+        return Platform::Status::OK;
+    }
+    Platform::Status MPU6050::ReadConfiguration(MPU6050Configuration* config_out) {
+        
+        if (config_out == nullptr) {
+            return Platform::Status::INVALID_PARAM;
+        }
+        
+        Platform::Status status;
+        uint8_t reg_value;
+        
+        // Read Power Management 1
+        status = ReadRegister(MPU6050Reg::PWR_MGMT_1, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->device_reset = (reg_value >> 7) & 0x01;
+        config_out->sleep = (reg_value >> 6) & 0x01;
+        config_out->cycle = (reg_value >> 5) & 0x01;
+        config_out->temp_dis = (reg_value >> 3) & 0x01;
+        config_out->clock_source = reg_value & 0x07;
+        
+        // Read Gyro Configuration
+        status = ReadRegister(MPU6050Reg::GYRO_CONFIG, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->gyro_self_test = (reg_value >> 5) & 0x07;
+        config_out->gyro_range = (reg_value >> 3) & 0x03;
+        
+        // Read Accel Configuration
+        status = ReadRegister(MPU6050Reg::ACCEL_CONFIG, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->accel_self_test = (reg_value >> 5) & 0x07;
+        config_out->accel_range = (reg_value >> 3) & 0x03;
+        
+        // Read DLPF Configuration
+        status = ReadRegister(MPU6050Reg::CONFIG, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->ext_sync = (reg_value >> 3) & 0x07;
+        config_out->dlpf_config = reg_value & 0x07;
+        
+        // Read Sample Rate Divider
+        status = ReadRegister(MPU6050Reg::SMPLRT_DIV, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->sample_rate_div = reg_value;
+        
+        // Read Interrupt Enable Register
+        status = ReadRegister(MPU6050Reg::INT_ENABLE, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->interrupt_data_rdy_en = reg_value & 0x01;
+        config_out->interrupt_fifo_oflow_en = (reg_value >> 4) & 0x01;
+        
+        // Read INT Pin / Bypass Enable Configuration
+        status = ReadRegister(MPU6050Reg::INT_PIN_CFG, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->int_level = (reg_value >> 7) & 0x01;
+        config_out->int_open = (reg_value >> 6) & 0x01;
+        config_out->latch_int_en = (reg_value >> 5) & 0x01;
+        config_out->int_rd_clear = (reg_value >> 4) & 0x01;
+        config_out->fsync_int_level = (reg_value >> 3) & 0x01;
+        config_out->fsync_int_en = (reg_value >> 2) & 0x01;
+        config_out->i2c_bypass_en = (reg_value >> 1) & 0x01;
+        
+        // Read User Control Register
+        status = ReadRegister(MPU6050Reg::USER_CTRL, &reg_value);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->fifo_en = (reg_value >> 6) & 0x01;
+        config_out->i2c_mst_en = (reg_value >> 5) & 0x01;
+        config_out->i2c_if_dis = (reg_value >> 4) & 0x01;
+        config_out->fifo_reset = (reg_value >> 2) & 0x01;
+        config_out->i2c_mst_reset = (reg_value >> 1) & 0x01;
+        config_out->sig_cond_reset = reg_value & 0x01;
+        
+        // Read and verify gyro offsets
+        int16_t gyro_offsets[3];
+        status = GetGyroOffsets(&gyro_offsets[0], &gyro_offsets[1], &gyro_offsets[2]);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->gyro_x_offset = gyro_offsets[0];
+        config_out->gyro_y_offset = gyro_offsets[1];
+        config_out->gyro_z_offset = gyro_offsets[2];
+        
+        // Read and verify accel offsets
+        int16_t accel_offsets[3];
+        status = GetAccelOffsets(&accel_offsets[0], &accel_offsets[1], &accel_offsets[2]);
+        if (status != Platform::Status::OK) {
+            return status;
+        }
+        config_out->accel_x_offset = accel_offsets[0];
+        config_out->accel_y_offset = accel_offsets[1];
+        config_out->accel_z_offset = accel_offsets[2];
+        
+        // Calculate current sensitivity factors based on the range settings
+        switch (config_out->gyro_range) {
+            case 0: // ±250°/s
+                config_out->gyro_scale_factor = 131.0f;
+                break;
+            case 1: // ±500°/s
+                config_out->gyro_scale_factor = 65.5f;
+                break;
+            case 2: // ±1000°/s
+                config_out->gyro_scale_factor = 32.8f;
+                break;
+            case 3: // ±2000°/s
+                config_out->gyro_scale_factor = 16.4f;
+                break;
+            default:
+                config_out->gyro_scale_factor = 131.0f; // Default
+        }
+        
+        switch (config_out->accel_range) {
+            case 0: // ±2g
+                config_out->accel_scale_factor = 16384.0f;
+                break;
+            case 1: // ±4g
+                config_out->accel_scale_factor = 8192.0f;
+                break;
+            case 2: // ±8g
+                config_out->accel_scale_factor = 4096.0f;
+                break;
+            case 3: // ±16g
+                config_out->accel_scale_factor = 2048.0f;
+                break;
+            default:
+                config_out->accel_scale_factor = 16384.0f; // Default
+        }
+        
+        return Platform::Status::OK;
     }
 }
 }
