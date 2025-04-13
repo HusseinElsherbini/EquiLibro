@@ -120,12 +120,11 @@ namespace Platform {
             };
         
             // NVIC priority levels
-            constexpr uint8_t PRIORITY_HIGHEST = 0x00U;
-            constexpr uint8_t PRIORITY_HIGH = 0x40U;
-            constexpr uint8_t PRIORITY_MEDIUM = 0x80U;
-            constexpr uint8_t PRIORITY_LOW = 0xC0U;
-            // Define a raw (unshifted) FreeRTOS-safe priority
-            constexpr uint8_t PRIORITY_FREERTOS_SAFE = configMAX_SYSCALL_INTERRUPT_PRIORITY >> (8 - configPRIO_BITS);
+            constexpr uint8_t LOGICAL_PRIORITY_FREERTOS_SAFE_MIN = configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY; // Value is 5
+            constexpr uint8_t LOGICAL_PRIORITY_MEDIUM = 8;  // Example
+            constexpr uint8_t LOGICAL_PRIORITY_LOW = 12; // Example
+            constexpr uint8_t LOGICAL_PRIORITY_HIGH = 4; // Example - MUST NOT call ...FromISR() functions from this priority level
+            constexpr uint8_t LOGICAL_PRIORITY_FREERTOS_SAFE_MAX = 15; // Value is 15 - MUST NOT call ...FromISR() functions from this priority level
 
             // NVIC priority grouping
             constexpr uint32_t PRIORITYGROUP_0 = 0x00000007U; // 0 bits for pre-emption priority, 4 bits for subpriority

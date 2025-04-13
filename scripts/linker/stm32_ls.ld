@@ -6,7 +6,7 @@ MEMORY
   SRAM(rwx):ORIGIN =0x20000000,LENGTH =64K
 }
 
-_Min_Stack_Size = 0x4000; /* 16KB minimum guarantee for stack */
+_Min_Stack_Size = 0x2000; /* 8KB minimum guarantee for stack */
 
 SECTIONS
 {

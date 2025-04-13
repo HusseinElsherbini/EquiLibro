@@ -13,22 +13,6 @@ Platform::Status BalanceRobotApp::InitializeTasks() {
         .auto_start = false
     };
     
-    // Configure monitoring task
-    monitoring_task_config = {
-        .stack_size = APP::MONITOR_TASK_STACK_SIZE,  // Use constant from header
-        .priority = APP::TASK_PRIORITY_LOGGING,      // Use appropriate priority
-        .name = "MonitorTask",
-        .auto_start = false
-    };
-    
-    // Create communication task
-    communication_task_config = {
-        .stack_size = APP::MGM_TASK_STACK_SIZE,
-        .priority = APP::TASK_PRIORITY_MGM_COMM,
-        .name = "CommTask",
-        .auto_start = false
-    };
-    
     // Create tasks but don't start them yet
     BaseType_t result = xTaskCreate(
         vBalancingTask,
@@ -105,6 +89,7 @@ void BalanceRobotApp::RegisterBalancingTask(TaskHandle_t handle) {
 }
 
 void vBalancingTask(void* params) {
+
     // Get the app instance that was passed during task creation
     BalanceRobotApp* app = static_cast<BalanceRobotApp*>(params);
     ProcessType processType = ProcessType::Balancing;
@@ -114,8 +99,10 @@ void vBalancingTask(void* params) {
     //app->RegisterBalancingTask(xTaskGetCurrentTaskHandle());
     
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    // get high water mark for stack usage
-    //UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // Get stack high water mark for this task
+
+    UBaseType_t initialHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+
+    SEGGER_RTT_printf(0, "Initial High Water Mark: %u\n", initialHighWaterMark);
 
     while (true) {
         // Wait for notification with timeout
@@ -126,13 +113,16 @@ void vBalancingTask(void* params) {
            
             // Process the balance application with the latest IMU data
             //app->Process(&processType);
+
+            UBaseType_t currentHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+            SEGGER_RTT_printf(0, "Current High Water Mark: %u\n", currentHighWaterMark);
             /*
             float angle = app->status.imu_data.filtered_angle;
             int32_t whole = (int32_t)angle;
             int32_t frac = abs((int32_t)((angle - whole) * 1000)); // Get absolute value of fractional part
             SEGGER_RTT_printf(0, "%d.%03d\n", whole, frac);*/
             // Toggle LED to indicate successful data processing
-            //
+            
         } else {
             test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
             // You might want to toggle a different pin to indicate timeout

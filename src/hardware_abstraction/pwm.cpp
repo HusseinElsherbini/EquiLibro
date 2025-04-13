@@ -108,7 +108,7 @@ Platform::Status PWMInterface::InitPwm(PWMConfig &config) {
     }
     
     // Get the timer interface
-    timer_interface = timer_interface = &Platform::TIM::TimerInterface::GetInstance(config.timer_instance);;
+    timer_interface =  &Platform::TIM::TimerInterface::GetInstance(config.timer_instance);;
     if (!timer_interface) {
         return Platform::Status::ERROR;
     }

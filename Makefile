@@ -77,11 +77,15 @@ INC_PATHS := \
   -Ilib/SEGGER/inc
 
 # Common compiler flags for C files
-COMMON_FLAGS := $(CPU_FLAGS) $(OPT_FLAGS) $(DBG_FLAGS) $(ERROR_FLAGS) $(WARN_FLAGS) $(MACROS) $(INC_PATHS)
+COMMON_FLAGS := $(CPU_FLAGS) $(OPT_FLAGS) $(DBG_FLAGS) $(ERROR_FLAGS) $(WARN_FLAGS) $(MACROS) $(INC_PATHS) $(PEDANTIC_WARN_FLAGS)
+
+# Optimization and debug flags
+APP_OPT_FLAGS := -O0
+FREERTOS_OPT_FLAGS := -O2  # Higher optimization for FreeRTOS
 
 # Language-specific flags
-CFLAGS := $(COMMON_FLAGS) -c -std=gnu11 -fdiagnostics-color=never
-CXXFLAGS := $(COMMON_FLAGS) -c -std=c++14 -fno-rtti -fno-exceptions -fno-use-cxa-atexit -fdiagnostics-color=never -Wno-psabi
+CFLAGS := $(COMMON_FLAGS) $(APP_OPT_FLAGS) -c -std=gnu11 -fdiagnostics-color=never
+CXXFLAGS := $(COMMON_FLAGS) $(APP_OPT_FLAGS) -c -std=c++14 -fno-rtti -fno-exceptions -fno-use-cxa-atexit -fdiagnostics-color=never -Wno-psabi
 
 # Assembler flags
 ASFLAGS := $(CPU_FLAGS) -c -x assembler-with-cpp $(INC_PATHS)
@@ -197,11 +201,18 @@ directories:
 
 # Rules for compilation
 
+# Rules for compilation with different optimization levels
+$(OBJDIR)/lib/FreeRTOS/src/%.o: $(LIB_DIR)/FreeRTOS/src/%.c | directories
+	$(make-dir)
+	@echo "Compiling FreeRTOS $< with optimization"
+	@$(CC) $(CPU_FLAGS) $(FREERTOS_OPT_FLAGS) $(DBG_FLAGS) $(ERROR_FLAGS) $(WARN_FLAGS) $(MACROS) $(INC_PATHS) -c $< -o $@
+
+# Regular C files (non-FreeRTOS)
 $(OBJDIR)/%.o: %.c | directories
 	$(make-dir)
 	@echo "Compiling $<"
-	@$(CC) $(CFLAGS) $< -o $@
-
+	@$(CC) $(CPU_FLAGS) $(APP_OPT_FLAGS) $(DBG_FLAGS) $(ERROR_FLAGS) $(WARN_FLAGS) $(MACROS) $(INC_PATHS) -c $< -o $@
+	
 $(OBJDIR)/%.o: %.cpp | directories
 	$(make-dir)
 	@echo "Compiling $<"

@@ -383,8 +383,8 @@ Platform::Status I2CInterface::Init(void* config) {
         }
         
         // Set interrupt priorities
-        Platform::CMSIS::NVIC::setPriority(ev_irq, Platform::CMSIS::NVIC::PRIORITY_FREERTOS_SAFE);
-        Platform::CMSIS::NVIC::setPriority(er_irq, Platform::CMSIS::NVIC::PRIORITY_FREERTOS_SAFE);
+        Platform::CMSIS::NVIC::setPriority(ev_irq, Platform::CMSIS::NVIC::LOGICAL_PRIORITY_FREERTOS_SAFE_MIN);
+        Platform::CMSIS::NVIC::setPriority(er_irq, Platform::CMSIS::NVIC::LOGICAL_PRIORITY_FREERTOS_SAFE_MIN);
         
         // Enable the interrupts
         Platform::CMSIS::NVIC::enableIRQ(ev_irq);

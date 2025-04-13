@@ -64,7 +64,32 @@ void enable_write_buffer_local_defs(void) {
     __DSB(); // Data Synchronization Barrier
     __ISB(); // Instruction Synchronization Barrier
 }
+/*
+void configureStatsTimer(void)
+{   
+    // Configure the timer for system statistics
+    Platform::TIM::TimerConfig config = {        
+        .desiredFrequency = 1000, // 1 kHz
+        .timerInstance = Platform::TIM::TimerInstance::TIM2,
+        .mode = Platform::TIM::Mode::Basic,
+        .clockDivision = Platform::TIM::ClockDivision::Div1,
+        .direction = Platform::TIM::Direction::Up,
+        .alignment = Platform::TIM::Alignment::Edge,
+        .prescaler = 0,      // No prescaling - max resolution
+        .period = 0xFFFFFFFF, // Maximum period (32-bit)
+        .autoReloadPreload = true,
+    };
+    
+    Platform::TIM::TimerInterface *timer_interface = &Platform::TIM::TimerInterface::GetInstance(config.timerInstance);
+    
+    // Initialize the timer with the configuration
+    Platform::Status status = timer_interface->Init(&config);
+    if(status != Platform::Status::OK) {
+        // Handle error
+        return;
+    }
 
+}*/
 // System initialization function
 Platform::Status SystemInit() {
     // System configuration and initialization
@@ -251,8 +276,8 @@ Platform::Status InitBalanceRobotApp() {
     // Configure the PID controller
     APP::PIDConfig pid_config = {
         .kp = 25.0f,                                 // Proportional gain
-        .ki = 2.0f,                                  // Integral gain
-        .kd = 0.5f,                                  // Derivative gain
+        .ki = 0.0f,                                  // Integral gain
+        .kd = 0.0f,                                  // Derivative gain
         .setpoint = 0.0f,                            // Target angle (upright)
         .output_limit = 9000.0f,                     // Max motor output
         .integral_limit = 200.0f                     // Integral windup limit

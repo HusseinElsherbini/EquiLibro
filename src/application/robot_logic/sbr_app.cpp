@@ -628,8 +628,6 @@ void BalanceRobotApp::IMUDataAvailableCallback(void* param) {
     app->imu->GetProcessedData(&app->status.imu_data);
 
     if (app->xBalancingTaskHandle != nullptr) {
-        Platform::GPIO::GpioInterface *test_gpio = &Platform::GPIO::GpioInterface::GetInstance();
-        test_gpio->TogglePin(Platform::GPIO::Port::PORTC, 0);
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
         xTaskNotifyFromISR(app->xBalancingTaskHandle,

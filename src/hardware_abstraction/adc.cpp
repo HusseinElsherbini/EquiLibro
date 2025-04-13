@@ -1016,7 +1016,7 @@ Platform::Status AdcInterface::StartConversion() {
     
     // Enable or disable interrupt in NVIC
     if (enable) {
-        Platform::CMSIS::NVIC::setPriority(irq, Platform::CMSIS::NVIC::PRIORITY_MEDIUM);
+        Platform::CMSIS::NVIC::setPriority(irq, Platform::CMSIS::NVIC::LOGICAL_PRIORITY_FREERTOS_SAFE_MIN);
         Platform::CMSIS::NVIC::enableIRQ(irq);
     } else {
         Platform::CMSIS::NVIC::disableIRQ(irq);

@@ -333,7 +333,7 @@ Platform::Status GpioInterface::EnableInterrupt(Port port, uint8_t pin, bool ena
         } else {
             irq = Platform::CMSIS::NVIC::IRQn::EXTI15_10;
         }
-        Platform::CMSIS::NVIC::setPriority(irq, Platform::CMSIS::NVIC::PRIORITY_FREERTOS_SAFE);
+        Platform::CMSIS::NVIC::setPriority(irq, Platform::CMSIS::NVIC::LOGICAL_PRIORITY_FREERTOS_SAFE_MIN);
         Platform::CMSIS::NVIC::enableIRQ(irq);
     } else {
         // Disable EXTI line interrupt

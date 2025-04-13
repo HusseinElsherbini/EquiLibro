@@ -6,10 +6,7 @@
 
 namespace APP {
 // Task notifications
-constexpr uint32_t NOTIFY_IMU_DATA = (1 << 3);
-constexpr uint32_t NOTIFY_SBUS_DATA = (1 << 0);    // Bit 0 for SBUS data
-constexpr uint32_t NOTIFY_SPORT_POLL = (1 << 1);    // Bit 1 for SmartPort poll
-constexpr uint32_t NOTIFY_LOGGER_TASK_ADC = (1 << 0);
+constexpr uint32_t NOTIFY_IMU_DATA = (1 << 0);
 
 // Task priorities (higher number = higher priority)
 constexpr UBaseType_t TASK_PRIORITY_BALANCE = 4;  // High - needs consistent timing
@@ -24,7 +21,7 @@ constexpr uint32_t MGM_TASK_PERIOD_MS = 100;  // 10Hz display updates
 constexpr uint32_t LOG_TASK_PERIOD_MS = 10;   // 100Hz Logging task
 
 // Stack sizes
-constexpr uint32_t BALANCING_TASK_STACK_SIZE = (configMINIMAL_STACK_SIZE * 20);  // Larger for filter calculations
+constexpr uint32_t BALANCING_TASK_STACK_SIZE = (configMINIMAL_STACK_SIZE * 10);  // Larger for filter calculations
 constexpr uint32_t RC_TASK_STACK_SIZE = configMINIMAL_STACK_SIZE;
 constexpr uint32_t MGM_TASK_STACK_SIZE = configMINIMAL_STACK_SIZE;
 constexpr uint32_t MONITOR_TASK_STACK_SIZE = (configMINIMAL_STACK_SIZE * 2);
